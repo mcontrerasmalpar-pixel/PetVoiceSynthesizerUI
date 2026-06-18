@@ -169,10 +169,10 @@ function playNote(freq:number,vol:number,dur:number,inst:InstrumentId,startTime:
 
 const INSTRUMENTS:{id:InstrumentId;label:string;emoji:string;bg:string}[]=[
   {id:"piano",   label:"Piano",    emoji:"🎹",bg:"#FF6B8A"},
-  {id:"guitar",  label:"Guitarra", emoji:"🎸",bg:"#FFE033"},
+  {id:"guitar",  label:"Guitar",   emoji:"🎸",bg:"#FFE033"},
   {id:"marimba", label:"Marimba",  emoji:"🎵",bg:"#B8E04A"},
-  {id:"flute",   label:"Flauta",   emoji:"🪈",bg:"#5BC8F5"},
-  {id:"bells",   label:"Campanas", emoji:"🔔",bg:"#FFE033"},
+  {id:"flute",   label:"Flute",    emoji:"🪈",bg:"#5BC8F5"},
+  {id:"bells",   label:"Bells",    emoji:"🔔",bg:"#FFE033"},
   {id:"synthpad",label:"Synth",    emoji:"🌟",bg:"#C06BDB"},
 ];
 
@@ -192,6 +192,102 @@ function MelodyGrid({notes,activeStep}:{notes:MelodyNote[];activeStep:number}){
           transform:isActive&&hasNote?"scale(1.1)":"none",transition:"all 0.07s",
         }}/>);
       }))}
+    </div>
+  );
+}
+
+// ─── Pet Recorder ──────────────────────────────────────────────────────────────────
+function PetRecorder({ drawingDataUrl }: { drawingDataUrl: string | null }) {
+  const [recording,  setRecording]  = useState(false);
+  const [audioURL,   setAudioURL]   = useState<string | null>(null);
+  const [audioBlob,  setAudioBlob]  = useState<Blob | null>(null);
+  const [remixing,   setRemixing]   = useState(false);
+  const [remixURL,   setRemixURL]   = useState<string | null>(null);
+  const mediaRecRef  = useRef<MediaRecorder | null>(null);
+  const chunksRef    = useRef<BlobPart[]>([]);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream);
+      chunksRef.current = [];
+      mr.ondataavailable = e => chunksRef.current.push(e.data);
+      mr.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        setAudioBlob(blob); setAudioURL(URL.createObjectURL(blob));
+        setRemixURL(null); stream.getTracks().forEach(t => t.stop());
+      };
+      mr.start(); mediaRecRef.current = mr;
+      setRecording(true); setAudioURL(null); setRemixURL(null);
+    } catch { alert("Microphone access denied."); }
+  };
+
+  const stopRecording = () => { mediaRecRef.current?.stop(); setRecording(false); };
+
+  const remixWithMelody = async () => {
+    if (!audioBlob || !drawingDataUrl) return;
+    setRemixing(true);
+    try {
+      const actx     = new AudioContext();
+      const arrayBuf = await audioBlob.arrayBuffer();
+      const decoded  = await actx.decodeAudioData(arrayBuf);
+      const src      = actx.createBufferSource();
+      src.buffer = decoded; src.loop = true;
+      const gain = actx.createGain(); gain.gain.value = 0.85;
+      src.connect(gain).connect(actx.destination);
+      src.start();
+      const dest   = actx.createMediaStreamDestination();
+      gain.connect(dest);
+      const mr2    = new MediaRecorder(dest.stream);
+      const chunks2: BlobPart[] = [];
+      mr2.ondataavailable = e => chunks2.push(e.data);
+      mr2.onstop = () => {
+        setRemixURL(URL.createObjectURL(new Blob(chunks2, { type: "audio/webm" })));
+        setRemixing(false);
+      };
+      mr2.start();
+      setTimeout(() => { mr2.stop(); src.stop(); actx.close(); }, 6000);
+    } catch (err) { console.error(err); setRemixing(false); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "0 14px 14px" }}>
+      <div style={{ height: "2px", background: "rgba(0,0,0,0.15)", borderRadius: "2px" }} />
+
+      {/* Record button */}
+      <button
+        onClick={recording ? stopRecording : startRecording}
+        style={{ width: "100%", padding: "14px", borderRadius: "14px", background: recording ? "#FF6B8A" : "#FFFBF2", border: recording ? "4px solid #1A1A1A" : "3px solid #1A1A1A", cursor: "pointer", fontFamily: "'Chewy',cursive", fontSize: "1.1rem", color: "#1A1A1A", boxShadow: recording ? "2px 2px 0 #1A1A1A" : "4px 4px 0 #1A1A1A", transform: recording ? "translate(2px,2px)" : "none", transition: "all 0.1s", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}>
+        <span>{recording ? "⏹" : "🔴"}</span>
+        <span>{recording ? "Stop recording" : "Record your pet"}</span>
+      </button>
+
+      {/* Listen — appears after recording */}
+      {audioURL && !recording && (
+        <audio controls src={audioURL} style={{ width: "100%", borderRadius: "8px" }} />
+      )}
+
+      {/* Remix — appears after recording */}
+      {audioURL && !recording && (
+        <button
+          onClick={remixWithMelody}
+          disabled={remixing || !drawingDataUrl}
+          style={{ width: "100%", padding: "14px", borderRadius: "14px", background: remixing ? "#DDD" : "#C06BDB", border: "3px solid #1A1A1A", cursor: remixing || !drawingDataUrl ? "not-allowed" : "pointer", fontFamily: "'Chewy',cursive", fontSize: "1.1rem", color: "#1A1A1A", boxShadow: remixing ? "none" : "4px 4px 0 #1A1A1A", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px" }}>
+          <span>🎵</span>
+          <span>{remixing ? "Mixing..." : "Remix with your drawing!"}</span>
+        </button>
+      )}
+
+      {/* Download — appears after remix */}
+      {remixURL && (
+        <div style={{ background: "#B8E04A", border: "3px solid #1A1A1A", borderRadius: "14px", padding: "12px", boxShadow: "4px 4px 0 #1A1A1A", display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div style={{ fontSize: "0.85rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>🎉 Your pet + your drawing:</div>
+          <audio controls src={remixURL} style={{ width: "100%", borderRadius: "8px" }} />
+          <a href={remixURL} download="pet-remix.webm" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", padding: "10px", borderRadius: "50px", background: "#FFFBF2", border: "3px solid #1A1A1A", fontFamily: "'Chewy',cursive", fontSize: "0.9rem", color: "#1A1A1A", boxShadow: "3px 3px 0 #1A1A1A", textDecoration: "none" }}>
+            <span>⬇️</span><span>Download remix</span>
+          </a>
+        </div>
+      )}
     </div>
   );
 }
@@ -242,13 +338,11 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
     setIsPlaying(false); onPlayingChange?.(false); setActiveStep(-1);
   },[onPlayingChange]);
 
-  // Expose stop to parent so switching tabs stops the music
   useEffect(()=>{
     if(onStopRef) onStopRef.current=stop;
     return()=>{ if(onStopRef) onStopRef.current=null; };
   },[stop,onStopRef]);
 
-  // Stop when component unmounts
   useEffect(()=>()=>{ stop(); },[]);
 
   const play = useCallback((notesOverride?:MelodyNote[])=>{
@@ -301,8 +395,8 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
           {drawingDataUrl?<img src={drawingDataUrl} style={{width:"100%",height:"100%",objectFit:"cover"}}/>:<span style={{fontSize:"1.6rem"}}>🎨</span>}
         </div>
         <div style={{display:"flex",flexDirection:"column",gap:"2px",flexShrink:0}}>
-          <span style={{fontSize:"0.85rem",color:"#1A1A1A"}}>🎵 Melodía generada</span>
-          {isAnalyzing?<span style={{fontSize:"0.7rem",color:"#555"}}>⏳ Analizando dibujo...</span>:<span style={{fontSize:"0.7rem",color:"#555"}}>{melody.filter(n=>!n.rest).length} notas · escala detectada</span>}
+          <span style={{fontSize:"0.85rem",color:"#1A1A1A"}}>🎵 Generated melody</span>
+          {isAnalyzing?<span style={{fontSize:"0.7rem",color:"#555"}}>⏳ Analyzing drawing...</span>:<span style={{fontSize:"0.7rem",color:"#555"}}>{melody.filter(n=>!n.rest).length} notes · scale detected</span>}
         </div>
         <div style={{display:"flex",gap:"6px",flexWrap:"wrap",flex:1,justifyContent:"center"}}>
           {INSTRUMENTS.map((ins,i)=>{
@@ -312,22 +406,27 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
           })}
         </div>
       </div>
+
       <div style={{flex:1,padding:"14px",display:"flex",flexDirection:"column",gap:"10px",overflow:"hidden"}}>
         <div style={{flex:1,background:"rgba(0,0,0,0.15)",border:"3px solid #1A1A1A",borderRadius:"16px",padding:"12px",boxShadow:"4px 4px 0 #1A1A1A",overflow:"hidden"}}>
           {isAnalyzing?(
             <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:"10px"}}>
               <span style={{fontSize:"2.5rem"}}>🔍</span>
-              <span style={{fontSize:"1rem",color:"#FFFBF2",fontFamily:"'Chewy',cursive"}}>Analizando tu dibujo...</span>
+              <span style={{fontSize:"1rem",color:"#FFFBF2",fontFamily:"'Chewy',cursive"}}>Analyzing your drawing...</span>
             </div>
           ):melody.length>0?(
             <MelodyGrid notes={melody} activeStep={activeStep}/>
           ):(
             <div style={{height:"100%",display:"flex",alignItems:"center",justifyContent:"center"}}>
-              <span style={{color:"#FFFBF2",fontFamily:"'Chewy',cursive"}}>Ve a Dibujar primero 🎨</span>
+              <span style={{color:"#FFFBF2",fontFamily:"'Chewy',cursive"}}>Go to Draw first 🎨</span>
             </div>
           )}
         </div>
       </div>
+
+      {/* Pet Recorder — below the melody grid */}
+      <PetRecorder drawingDataUrl={drawingDataUrl} />
+
       <div style={{background:"#FFFBF2",borderTop:"3px solid #1A1A1A",padding:"10px 20px",display:"flex",alignItems:"center",gap:"14px",flexShrink:0,flexWrap:"wrap",boxShadow:"0 -2px 0 #1A1A1A"}}>
         <button onClick={isPlaying?stop:play} disabled={!melody.length||isAnalyzing} style={{width:"56px",height:"56px",borderRadius:"50%",background:isPlaying?"#FF6B8A":"#B8E04A",border:"3px solid #1A1A1A",cursor:melody.length?"pointer":"not-allowed",fontSize:"1.6rem",boxShadow:"4px 4px 0 #1A1A1A",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.1s"}}
           onMouseDown={e=>{e.currentTarget.style.transform="translate(2px,2px)";e.currentTarget.style.boxShadow="2px 2px 0 #1A1A1A";}}
@@ -346,10 +445,10 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
           <button onClick={onSavePet} style={{padding:"10px 20px",borderRadius:"50px",background:"#FF8C42",border:"4px solid #1A1A1A",cursor:"pointer",fontFamily:"'Chewy',cursive",fontSize:"0.95rem",color:"#1A1A1A",boxShadow:"4px 4px 0 #1A1A1A",display:"flex",alignItems:"center",gap:"6px"}}
             onMouseDown={e=>{e.currentTarget.style.transform="translate(2px,2px)";e.currentTarget.style.boxShadow="2px 2px 0 #1A1A1A";}}
             onMouseUp={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="4px 4px 0 #1A1A1A";}}>
-            <span>💾</span><span>Guardar mascota</span></button>
+            <span>💾</span><span>Save pet</span></button>
         )}
         {savedPet&&(
-          <div style={{padding:"8px 16px",borderRadius:"50px",background:"#B8E04A",border:"3px solid #1A1A1A",fontFamily:"'Chewy',cursive",fontSize:"0.9rem",color:"#1A1A1A",boxShadow:"3px 3px 0 #1A1A1A"}}>✅ {savedPet.name} guardada</div>
+          <div style={{padding:"8px 16px",borderRadius:"50px",background:"#B8E04A",border:"3px solid #1A1A1A",fontFamily:"'Chewy',cursive",fontSize:"0.9rem",color:"#1A1A1A",boxShadow:"3px 3px 0 #1A1A1A"}}>✅ {savedPet.name} saved</div>
         )}
       </div>
     </div>
