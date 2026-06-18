@@ -1,16 +1,15 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 export type PetVoicePreset =
   | "cat" | "dog" | "bird" | "frog" | "robot" | "ghost" | "baby" | "giant";
 
 export interface PetVoiceConfig {
   preset: PetVoicePreset;
-  pitch: number;       // 0.1 – 4.0  (Web Speech pitch)
-  rate: number;        // 0.1 – 2.0  (Web Speech rate)
-  pitchShift: number;  // semitones applied via AudioContext (-12 to +12)
-  robotize: boolean;   // vocoder-like ring modulation
-  echo: boolean;       // delay feedback
+  pitch: number;
+  rate: number;
+  pitchShift: number;
+  robotize: boolean;
+  echo: boolean;
 }
 
 export const PRESETS: Record<PetVoicePreset, Omit<PetVoiceConfig, "preset">> = {
@@ -25,109 +24,81 @@ export const PRESETS: Record<PetVoicePreset, Omit<PetVoiceConfig, "preset">> = {
 };
 
 export const PRESET_META: Record<PetVoicePreset, { emoji: string; label: string; bg: string }> = {
-  cat:   { emoji: "🐱", label: "Gato",   bg: "#FF6B8A" },
-  dog:   { emoji: "🐶", label: "Perro",  bg: "#FF8C42" },
-  bird:  { emoji: "🐦", label: "Pájaro", bg: "#5BC8F5" },
-  frog:  { emoji: "🐸", label: "Rana",   bg: "#B8E04A" },
-  robot: { emoji: "🤖", label: "Robot",  bg: "#5BAEFF" },
+  cat:   { emoji: "🐱", label: "Gato",    bg: "#FF6B8A" },
+  dog:   { emoji: "🐶", label: "Perro",   bg: "#FF8C42" },
+  bird:  { emoji: "🐦", label: "Pájaro",  bg: "#5BC8F5" },
+  frog:  { emoji: "🐸", label: "Rana",    bg: "#B8E04A" },
+  robot: { emoji: "🤖", label: "Robot",   bg: "#5BAEFF" },
   ghost: { emoji: "👻", label: "Fantasma",bg: "#C06BDB" },
-  baby:  { emoji: "🍼", label: "Bebé",   bg: "#FFE033" },
-  giant: { emoji: "🦕", label: "Gigante",bg: "#5FD49A" },
+  baby:  { emoji: "🍼", label: "Bebé",    bg: "#FFE033" },
+  giant: { emoji: "🦕", label: "Gigante", bg: "#5FD49A" },
 };
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
+/** Wait for voices to be loaded — fixes the race condition on first call */
+function getVoicesAsync(): Promise<SpeechSynthesisVoice[]> {
+  return new Promise(resolve => {
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) { resolve(voices); return; }
+    window.speechSynthesis.onvoiceschanged = () => {
+      resolve(window.speechSynthesis.getVoices());
+    };
+    // Safari fallback: voices may never fire onvoiceschanged
+    setTimeout(() => resolve(window.speechSynthesis.getVoices()), 500);
+  });
+}
+
 export function usePetVoice() {
   const [config, setConfig] = useState<PetVoiceConfig>({
     preset: "cat",
     ...PRESETS["cat"],
   });
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isSpeaking,  setIsSpeaking]  = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript]   = useState("");
-  const [error, setError]             = useState<string | null>(null);
+  const [transcript,  setTranscript]  = useState("");
+  const [error,       setError]       = useState<string | null>(null);
 
-  const audioCtxRef  = useRef<AudioContext | null>(null);
-  const recognRef    = useRef<any>(null);
-  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const recognRef = useRef<any>(null);
 
-  function getAudioCtx() {
-    if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
-    return audioCtxRef.current;
-  }
+  // Pre-warm voice list on mount so first speak() is instant
+  useEffect(() => {
+    if (window.speechSynthesis) getVoicesAsync();
+  }, []);
 
-  // ── Apply Web Audio FX chain to a MediaStream (mic) ──────────────────────
-  function buildFxChain(ctx: AudioContext, src: AudioNode, cfg: PetVoiceConfig): AudioNode {
-    let node: AudioNode = src;
-
-    // Pitch shift via playback-rate trick: not applicable on live stream;
-    // instead we use a BiquadFilter to colour the timbre.
-    const eq = ctx.createBiquadFilter();
-    if (cfg.pitchShift > 0) {
-      eq.type = "highshelf";
-      eq.frequency.value = 2000;
-      eq.gain.value = cfg.pitchShift * 1.5;
-    } else {
-      eq.type = "lowshelf";
-      eq.frequency.value = 800;
-      eq.gain.value = Math.abs(cfg.pitchShift) * 1.5;
-    }
-    node.connect(eq);
-    node = eq;
-
-    if (cfg.robotize) {
-      // Ring modulation: multiply signal by a sine carrier
-      const carrier = ctx.createOscillator();
-      carrier.frequency.value = 60;
-      carrier.start();
-      const ringGain = ctx.createGain();
-      ringGain.gain.value = 0;
-      carrier.connect(ringGain.gain);
-      const ringMul = ctx.createGain();
-      node.connect(ringMul);
-      ringGain.connect(ringMul.gain);
-      node = ringMul;
-    }
-
-    if (cfg.echo) {
-      const delay = ctx.createDelay(1.0);
-      delay.delayTime.value = 0.28;
-      const feedback = ctx.createGain();
-      feedback.gain.value = 0.42;
-      const dryGain  = ctx.createGain(); dryGain.gain.value  = 0.7;
-      const wetGain  = ctx.createGain(); wetGain.gain.value  = 0.5;
-      const merger   = ctx.createGain();
-      node.connect(dryGain); dryGain.connect(merger);
-      node.connect(delay);   delay.connect(feedback); feedback.connect(delay);
-      delay.connect(wetGain); wetGain.connect(merger);
-      node = merger;
-    }
-
-    return node;
-  }
-
-  // ── Speak text via Web Speech API + record + re-process ──────────────────
-  const speak = useCallback((text: string) => {
+  // ── speak ──────────────────────────────────────────────────────────────
+  const speak = useCallback(async (text: string) => {
     if (!text.trim()) return;
     if (!window.speechSynthesis) {
       setError("Tu browser no soporta síntesis de voz 😢");
       return;
     }
     window.speechSynthesis.cancel();
-    setIsSpeaking(true);
     setError(null);
+    setIsSpeaking(true);
 
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.pitch = config.pitch;
-    utt.rate  = config.rate;
-    utt.lang  = "es-ES";
+    const utt    = new SpeechSynthesisUtterance(text);
+    utt.pitch    = Math.min(Math.max(config.pitch, 0.1), 2); // clamp: Web Speech max is 2
+    utt.rate     = Math.min(Math.max(config.rate,  0.1), 10);
+    utt.lang     = "es-ES";
+    utt.volume   = 1;
 
-    // Try to pick a Spanish voice if available
-    const voices = window.speechSynthesis.getVoices();
-    const esVoice = voices.find(v => v.lang.startsWith("es"));
-    if (esVoice) utt.voice = esVoice;
+    // ✔ Wait for voices before assigning — this fixes the "Error al sintetizar" bug
+    try {
+      const voices = await getVoicesAsync();
+      const esVoice = voices.find(v => v.lang.startsWith("es"))
+                   ?? voices.find(v => v.default)
+                   ?? voices[0];
+      if (esVoice) utt.voice = esVoice;
+    } catch { /* ignore, browser will use default */ }
 
-    utt.onend = () => setIsSpeaking(false);
-    utt.onerror = () => { setIsSpeaking(false); setError("Error al sintetizar voz"); };
+    utt.onend   = () => setIsSpeaking(false);
+    utt.onerror = (ev) => {
+      setIsSpeaking(false);
+      // 'interrupted' fires when we cancel before new speech — not a real error
+      if ((ev as any).error !== "interrupted") {
+        setError(`Error al sintetizar voz (${(ev as any).error ?? "desconocido"})`);
+      }
+    };
+
     window.speechSynthesis.speak(utt);
   }, [config]);
 
@@ -136,34 +107,29 @@ export function usePetVoice() {
     setIsSpeaking(false);
   }, []);
 
-  // ── Mic listen → transcribe → speak as pet ───────────────────────────────
+  // ── mic listen ───────────────────────────────────────────────────────────
   const startListening = useCallback(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) {
-      setError("Tu browser no soporta reconocimiento de voz 😢");
+      setError("Tu browser no soporta reconocimiento de voz. Usa Chrome.");
       return;
     }
     const recog = new SR();
-    recog.lang = "es-ES";
+    recog.lang           = "es-ES";
     recog.interimResults = true;
     recog.continuous     = false;
-
     recog.onstart  = () => { setIsListening(true); setError(null); };
     recog.onend    = () => setIsListening(false);
     recog.onerror  = (e: any) => {
       setIsListening(false);
-      setError(e.error === "not-allowed" ? "Permite el micrófono 🎤" : `Error: ${e.error}`);
+      setError(e.error === "not-allowed" ? "Permite el micrófono 🎤" : `Error mic: ${e.error}`);
     };
     recog.onresult = (e: any) => {
       const t = Array.from(e.results as any[])
-        .map((r: any) => r[0].transcript)
-        .join("");
+        .map((r: any) => r[0].transcript).join("");
       setTranscript(t);
-      if (e.results[e.results.length - 1].isFinal) {
-        speak(t);
-      }
+      if (e.results[e.results.length - 1].isFinal) speak(t);
     };
-
     recognRef.current = recog;
     recog.start();
   }, [speak]);
@@ -173,7 +139,6 @@ export function usePetVoice() {
     setIsListening(false);
   }, []);
 
-  // ── Apply preset ──────────────────────────────────────────────────────────
   const applyPreset = useCallback((preset: PetVoicePreset) => {
     setConfig({ preset, ...PRESETS[preset] });
   }, []);
