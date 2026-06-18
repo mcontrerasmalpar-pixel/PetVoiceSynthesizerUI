@@ -1,13 +1,14 @@
 import { useState, useCallback, useRef } from "react";
-import { DrawMode }    from "./components/DrawMode";
-import { PlayMode }    from "./components/PlayMode";
-import { PetProfile } from "./components/PetProfile";
-import { SavePetModal } from "./components/SavePetModal";
-import { LoginScreen } from "./components/LoginScreen";
+import { DrawMode }        from "./components/DrawMode";
+import { PlayMode }        from "./components/PlayMode";
+import { ExperimentMode } from "./components/ExperimentMode";
+import { PetProfile }     from "./components/PetProfile";
+import { SavePetModal }   from "./components/SavePetModal";
+import { LoginScreen }    from "./components/LoginScreen";
 import { uploadDrawing, savePet, type AnimalType, type Pet } from "../lib/supabase";
 import type { MelodyNote } from "./components/PlayMode";
 
-type Screen = "draw" | "play" | "profile";
+type Screen = "draw" | "play" | "experiment" | "profile";
 
 export default function App() {
   const [loggedIn,       setLoggedIn]       = useState(false);
@@ -52,9 +53,10 @@ export default function App() {
   if (!loggedIn) return <LoginScreen onLogin={handleLogin} />;
 
   const TABS: { id: Screen; label: string; locked?: boolean }[] = [
-    { id: "draw",    label: "🎨 Draw" },
-    { id: "play",    label: "🎵 Listen" },
-    { id: "profile", label: "🐾 Profile", locked: !savedPet },
+    { id: "draw",       label: "🎨 Draw" },
+    { id: "play",       label: "🎵 Listen" },
+    { id: "experiment", label: "🧪 Experiments" },
+    { id: "profile",    label: "🐾 Profile", locked: !savedPet },
   ];
 
   return (
@@ -91,17 +93,18 @@ export default function App() {
           </div>
         </div>
 
-        <div style={{ display:"flex", gap:"6px" }}>
+        <div style={{ display:"flex", gap:"5px", flexWrap:"wrap" }}>
           {TABS.map(t => (
             <button key={t.id} onClick={() => !t.locked && goTo(t.id)} style={{
-              padding:"6px 14px", borderRadius:"50px",
+              padding:"5px 10px", borderRadius:"50px",
               background: screen===t.id ? "#FF8C42" : t.locked ? "#E8E0C8" : "#FFFBF2",
-              border: screen===t.id ? "4px solid #1A1A1A" : "3px solid #1A1A1A",
+              border: screen===t.id ? "3px solid #1A1A1A" : "2px solid #1A1A1A",
               color: t.locked ? "#AAA" : "#1A1A1A",
               cursor: t.locked ? "not-allowed" : "pointer",
-              fontFamily:"'Chewy'", fontSize:"0.85rem",
-              boxShadow: screen===t.id ? "2px 2px 0 #1A1A1A" : "3px 3px 0 #1A1A1A",
+              fontFamily:"'Chewy'", fontSize:"0.78rem",
+              boxShadow: screen===t.id ? "2px 2px 0 #1A1A1A" : "2px 2px 0 #1A1A1A",
               transform: screen===t.id ? "translate(1px,1px)" : "none",
+              whiteSpace: "nowrap",
             }}>{t.label}{t.locked ? " 🔒" : ""}</button>
           ))}
         </div>
@@ -142,6 +145,9 @@ export default function App() {
             onStopRef={stopMelodyRef}
           />
         )}
+        {screen === "experiment" && (
+          <ExperimentMode melody={melody} />
+        )}
         {screen === "profile" && (
           <PetProfile
             currentPet={savedPet} melody={melody}
@@ -156,8 +162,8 @@ export default function App() {
         background:"#B8E04A", borderTop:"3px solid #1A1A1A",
         display:"flex", alignItems:"center", justifyContent:"center", gap:"10px",
       }}>
-        {["1 · Draw 🎨","→","2 · Listen 🎵","→","3 · Save 🐾"].map((t,i) => (
-          <span key={i} style={{ fontSize:"0.75rem",color:"#1A1A1A",fontFamily:"'Chewy'",opacity:i%2===1?0.4:1 }}>{t}</span>
+        {["1 · Draw 🎨","→","2 · Listen 🎵","→","3 · Experiments 🧪","→","4 · Save 🐾"].map((t,i) => (
+          <span key={i} style={{ fontSize:"0.72rem",color:"#1A1A1A",fontFamily:"'Chewy'",opacity:i%2===1?0.4:1 }}>{t}</span>
         ))}
       </div>
     </div>
