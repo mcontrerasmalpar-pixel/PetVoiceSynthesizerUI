@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { DrawMode } from "./components/DrawMode";
 import { PlayMode } from "./components/PlayMode";
-import { VoiceMode } from "./components/VoiceMode";
 import { LoginScreen } from "./components/LoginScreen";
 
-type Screen = "draw" | "play" | "voice";
+type Screen = "draw" | "play";
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>("draw");
@@ -24,9 +23,8 @@ export default function App() {
   }
 
   const TABS: { id: Screen; label: string }[] = [
-    { id: "draw",  label: "🎨 Draw"  },
-    { id: "play",  label: "🎵 Play"  },
-    { id: "voice", label: "🔊 Voice" },
+    { id: "draw", label: "🎨 Dibujar" },
+    { id: "play", label: "🎵 Escuchar" },
   ];
 
   return (
@@ -40,12 +38,11 @@ export default function App() {
     >
       {/* Floating bg doodles */}
       {[
-        { e: "🎵", top: "8%",  left: "4%",  size: "1.6rem", rot: "15deg",  op: 0.45 },
-        { e: "🐾", top: "15%", left: "92%", size: "1.4rem", rot: "-10deg", op: 0.4  },
-        { e: "✦",  top: "5%",  left: "55%", size: "1.2rem", rot: "20deg",  op: 0.35 },
-        { e: "🎵", top: "72%", left: "88%", size: "1.3rem", rot: "-18deg", op: 0.35 },
-        { e: "⭐", top: "80%", left: "6%",  size: "1.1rem", rot: "8deg",   op: 0.4  },
-        { e: "🐾", top: "60%", left: "2%",  size: "1rem",   rot: "12deg",  op: 0.3  },
+        { e: "🎵", top: "8%",  left: "4%",  size: "1.6rem", rot: "15deg",  op: 0.35 },
+        { e: "🐾", top: "15%", left: "92%", size: "1.4rem", rot: "-10deg", op: 0.3  },
+        { e: "✦",  top: "5%",  left: "55%", size: "1.2rem", rot: "20deg",  op: 0.25 },
+        { e: "🎵", top: "72%", left: "88%", size: "1.3rem", rot: "-18deg", op: 0.25 },
+        { e: "⭐", top: "80%", left: "6%",  size: "1.1rem", rot: "8deg",   op: 0.3  },
       ].map((d, i) => (
         <span key={i} style={{
           position: "fixed", fontSize: d.size, top: d.top, left: d.left,
@@ -58,12 +55,9 @@ export default function App() {
         background: "#FFE033",
         borderBottom: "3px solid #1A1A1A",
         padding: "8px 20px",
-        display: "flex",
-        alignItems: "center",
+        display: "flex", alignItems: "center",
         justifyContent: "space-between",
-        flexShrink: 0,
-        position: "relative",
-        zIndex: 10,
+        flexShrink: 0, position: "relative", zIndex: 10,
         boxShadow: "0 3px 0 #1A1A1A",
       }}>
         {/* Logo */}
@@ -77,12 +71,12 @@ export default function App() {
           <div>
             <h1 style={{
               fontSize: "1.4rem", margin: 0, color: "#1A1A1A",
-              fontFamily: "'Chewy', cursive", lineHeight: 1.1, letterSpacing: "0.5px",
-            }}>Pet Voice Synthesizer</h1>
+              fontFamily: "'Chewy', cursive", lineHeight: 1.1,
+            }}>Pet Melody</h1>
             <p style={{
               fontSize: "0.75rem", margin: 0, color: "#5A3A00",
               fontFamily: "'Chewy', cursive",
-            }}>draw · play · speak 🎵</p>
+            }}>dibuja · escucha 🎵</p>
           </div>
         </div>
 
@@ -93,21 +87,24 @@ export default function App() {
             return (
               <button
                 key={t.id}
-                onClick={() => setScreen(t.id)}
+                onClick={() => {
+                  // If going to play without a drawing, stay on draw
+                  if (t.id === "play" && !drawingDataUrl) return;
+                  setScreen(t.id);
+                }}
                 style={{
-                  padding: "8px 20px",
+                  padding: "8px 24px",
                   borderRadius: "50px",
-                  background: isActive ? "#FF8C42" : "#FFFBF2",
+                  background: isActive ? "#FF8C42" : t.id === "play" && !drawingDataUrl ? "#E8E0C8" : "#FFFBF2",
                   border: "3px solid #1A1A1A",
-                  color: "#1A1A1A",
-                  cursor: "pointer",
-                  fontFamily: "'Chewy', cursive",
-                  fontSize: "1rem",
+                  color: t.id === "play" && !drawingDataUrl ? "#AAA" : "#1A1A1A",
+                  cursor: t.id === "play" && !drawingDataUrl ? "not-allowed" : "pointer",
+                  fontFamily: "'Chewy', cursive", fontSize: "1.05rem",
                   boxShadow: isActive ? "2px 2px 0 #1A1A1A" : "3px 3px 0 #1A1A1A",
                   transform: isActive ? "translate(1px,1px)" : "none",
                   transition: "all 0.1s",
                 }}
-              >{t.label}</button>
+              >{t.label}{t.id === "play" && !drawingDataUrl ? " 🔒" : ""}</button>
             );
           })}
         </div>
@@ -119,30 +116,39 @@ export default function App() {
           borderRadius: "50px", padding: "5px 14px",
           boxShadow: "3px 3px 0 #1A1A1A",
         }}>
-          <span style={{ fontSize: "1.2rem" }}>🐱</span>
+          {drawingDataUrl
+            ? <img src={drawingDataUrl} style={{ width: "28px", height: "28px", borderRadius: "6px", border: "2px solid #1A1A1A", objectFit: "cover" }} />
+            : <span style={{ fontSize: "1.2rem" }}>🐱</span>
+          }
           <span style={{ fontFamily: "'Chewy', cursive", fontSize: "0.95rem", color: "#1A1A1A" }}>{petName}</span>
         </div>
       </header>
 
       {/* ── Screens ── */}
       <div className="flex-1 flex flex-col overflow-hidden" style={{ position: "relative", zIndex: 1 }}>
-        {screen === "draw"  && <DrawMode  onSaveDrawing={setDrawingDataUrl} />}
-        {screen === "play"  && <PlayMode  drawingDataUrl={drawingDataUrl}   />}
-        {screen === "voice" && <VoiceMode drawingDataUrl={drawingDataUrl}   />}
+        {screen === "draw" && (
+          <DrawMode
+            onSaveDrawing={(url) => {
+              setDrawingDataUrl(url);
+              // Auto-navigate to play after saving
+              if (url) setScreen("play");
+            }}
+          />
+        )}
+        {screen === "play" && <PlayMode drawingDataUrl={drawingDataUrl} />}
       </div>
 
       {/* ── Footer ── */}
       <div style={{
-        height: "44px", flexShrink: 0,
+        height: "36px", flexShrink: 0,
         background: "#B8E04A", borderTop: "3px solid #1A1A1A",
-        display: "flex", alignItems: "center", justifyContent: "center", gap: "24px",
-        boxShadow: "0 -2px 0 #1A1A1A",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: "16px",
       }}>
-        {["1 · Draw 🎨", "→", "2 · Play 🎵", "→", "3 · Voice 🔊"].map((t, i) => (
+        {["1 · Dibuja tu mascota 🎨", "→", "2 · Escucha su melodía 🎵"].map((t, i) => (
           <span key={i} style={{
-            fontSize: "0.9rem", color: "#1A1A1A",
+            fontSize: "0.85rem", color: "#1A1A1A",
             fontFamily: "'Chewy', cursive",
-            opacity: i % 2 === 1 ? 0.5 : 1,
+            opacity: i === 1 ? 0.4 : 1,
           }}>{t}</span>
         ))}
       </div>

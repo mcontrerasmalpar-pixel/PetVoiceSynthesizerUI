@@ -1,676 +1,585 @@
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
-// ─── Audio Engine ────────────────────────────────────────────────────────────
-let audioCtx: AudioContext | null = null;
-function getCtx() {
-  if (!audioCtx) audioCtx = new AudioContext();
-  return audioCtx;
-}
+// ─────────────────────────────────────────────────────────────────
+// MELODY GENERATOR — derives a note sequence from the drawing
+// ─────────────────────────────────────────────────────────────────
 
-function playOsc(freq: number, type: OscillatorType, dur = 1.2, vol = 0.35, attack = 0.01, vib = 0) {
-  const ctx = getCtx();
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  osc.type = type;
-  osc.frequency.setValueAtTime(freq, ctx.currentTime);
-  if (vib > 0) {
-    const vibOsc = ctx.createOscillator();
-    const vibGain = ctx.createGain();
-    vibOsc.frequency.value = 5.5;
-    vibGain.gain.value = vib;
-    vibOsc.connect(vibGain);
-    vibGain.connect(osc.frequency);
-    vibOsc.start(ctx.currentTime);
-    vibOsc.stop(ctx.currentTime + dur);
-  }
-  gain.gain.setValueAtTime(0.001, ctx.currentTime);
-  gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + attack);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-  osc.start(ctx.currentTime);
-  osc.stop(ctx.currentTime + dur);
-}
-
-function playNoise(dur = 0.18, vol = 0.4, highpass = 1200) {
-  const ctx = getCtx();
-  const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
-  const d = buf.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  const filt = ctx.createBiquadFilter();
-  filt.type = "highpass";
-  filt.frequency.value = highpass;
-  const gain = ctx.createGain();
-  src.connect(filt);
-  filt.connect(gain);
-  gain.connect(ctx.destination);
-  gain.gain.setValueAtTime(vol, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-  src.start();
-  src.stop(ctx.currentTime + dur);
-}
-
-function piano(f: number)   { playOsc(f, "sine", 1.6, 0.4, 0.005); }
-function guitar(f: number)  { playOsc(f, "triangle", 1.4, 0.45, 0.003); }
-function trumpet(f: number) { playOsc(f, "sawtooth", 0.9, 0.35, 0.05, 8); }
-function sax(f: number)     { playOsc(f, "sawtooth", 1.1, 0.38, 0.08, 5); }
-function violin(f: number)  { playOsc(f, "sawtooth", 1.8, 0.3, 0.18, 14); }
-function marimba(f: number) { playOsc(f, "sine", 0.7, 0.5, 0.002); }
-function accordion(f: number) { playOsc(f, "square", 1.0, 0.28, 0.04, 6); }
-
-function kick() {
-  const ctx = getCtx();
-  const o = ctx.createOscillator(), g = ctx.createGain();
-  o.connect(g); g.connect(ctx.destination);
-  o.type = "sine";
-  o.frequency.setValueAtTime(160, ctx.currentTime);
-  o.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.35);
-  g.gain.setValueAtTime(0.9, ctx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-  o.start(); o.stop(ctx.currentTime + 0.45);
-}
-function snare()    { playNoise(0.18, 0.5, 1200); }
-function hihat()    { playNoise(0.08, 0.28, 8000); }
-function tom(f: number) {
-  const ctx = getCtx();
-  const o = ctx.createOscillator(), g = ctx.createGain();
-  o.connect(g); g.connect(ctx.destination);
-  o.type = "sine";
-  o.frequency.setValueAtTime(f, ctx.currentTime);
-  o.frequency.exponentialRampToValueAtTime(f * 0.6, ctx.currentTime + 0.25);
-  g.gain.setValueAtTime(0.7, ctx.currentTime);
-  g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-  o.start(); o.stop(ctx.currentTime + 0.35);
-}
-
-function guitarChord(freqs: number[]) {
-  freqs.forEach((f, i) => setTimeout(() => guitar(f), i * 28));
-}
-
-const NOTES_C4 = [261.63, 293.66, 329.63, 349.23, 392, 440, 493.88, 523.25];
-const NOTE_NAMES = ["C", "D", "E", "F", "G", "A", "B", "C²"];
-const BLACK = [
-  { after: 0, freq: 277.18, name: "C#" },
-  { after: 1, freq: 311.13, name: "D#" },
-  { after: 3, freq: 369.99, name: "F#" },
-  { after: 4, freq: 415.30, name: "G#" },
-  { after: 5, freq: 466.16, name: "A#" },
-];
-
-const GUITAR_CHORDS: Record<string, number[]> = {
-  "C":  [261.63, 329.63, 392, 523.25, 659.25],
-  "G":  [196, 246.94, 293.66, 392, 493.88, 659.25],
-  "Am": [220, 261.63, 329.63, 440, 523.25],
-  "F":  [174.61, 220, 261.63, 349.23, 440],
-  "Em": [164.81, 196, 246.94, 329.63, 392, 493.88],
-  "D":  [293.66, 369.99, 440, 587.33],
+// Musical scales (relative semitones from root)
+const SCALES: Record<string, number[]> = {
+  major:      [0, 2, 4, 5, 7, 9, 11, 12],
+  minor:      [0, 2, 3, 5, 7, 8, 10, 12],
+  pentatonic: [0, 2, 4, 7, 9, 12, 14, 16],
+  blues:      [0, 3, 5, 6, 7, 10, 12, 15],
+  dorian:     [0, 2, 3, 5, 7, 9, 10, 12],
 };
-const GUITAR_STRINGS = [
-  { name: "E²", freq: 329.63 }, { name: "B", freq: 246.94 },
-  { name: "G", freq: 196 },    { name: "D", freq: 146.83 },
-  { name: "A", freq: 110 },    { name: "E", freq: 82.41 },
-];
 
-const TRUMPET_NOTES = [
-  { label: "○○○", name: "Bb4", freq: 466.16 },
-  { label: "●○○", name: "Ab4", freq: 415.3 },
-  { label: "○●○", name: "A4",  freq: 440 },
-  { label: "○○●", name: "G4",  freq: 392 },
-  { label: "●●○", name: "F4",  freq: 349.23 },
-  { label: "●○●", name: "E4",  freq: 329.63 },
-  { label: "○●●", name: "Eb4", freq: 311.13 },
-  { label: "●●●", name: "D4",  freq: 293.66 },
-];
+// Note roots in Hz (C4 = 261.63)
+const ROOTS: Record<string, number> = {
+  C: 261.63, D: 293.66, E: 329.63, F: 349.23,
+  G: 392.00, A: 440.00, B: 493.88,
+};
 
-const SAX_KEYS = [
-  { name: "C",  freq: 261.63 }, { name: "D",  freq: 293.66 },
-  { name: "E",  freq: 329.63 }, { name: "F",  freq: 349.23 },
-  { name: "G",  freq: 392 },    { name: "A",  freq: 440 },
-  { name: "B",  freq: 493.88 }, { name: "C²", freq: 523.25 },
-  { name: "D²", freq: 587.33 }, { name: "E²", freq: 659.25 },
-  { name: "F²", freq: 698.46 }, { name: "G²", freq: 783.99 },
-];
+const ROOT_NAMES = Object.keys(ROOTS);
+const SCALE_NAMES = Object.keys(SCALES);
 
-const VIOLIN_STRINGS = [
-  { name: "G", freq: 196,    color: "#B8E04A" },
-  { name: "D", freq: 293.66, color: "#FFE033" },
-  { name: "A", freq: 440,    color: "#FF8C42" },
-  { name: "E", freq: 659.25, color: "#FF6B8A" },
-];
-
-const MARIMBA_NOTES = [
-  { name: "C",  freq: 261.63, color: "#FF6B8A", h: 90 },
-  { name: "D",  freq: 293.66, color: "#FF8C42", h: 86 },
-  { name: "E",  freq: 329.63, color: "#FFE033", h: 82 },
-  { name: "F",  freq: 349.23, color: "#B8E04A", h: 78 },
-  { name: "G",  freq: 392,    color: "#5BC8F5", h: 74 },
-  { name: "A",  freq: 440,    color: "#C06BDB", h: 70 },
-  { name: "B",  freq: 493.88, color: "#5BAEFF", h: 66 },
-  { name: "C²", freq: 523.25, color: "#5FD49A", h: 62 },
-];
-
-const ACCORDION_BASS = [
-  { name: "C",  freq: 65.41 }, { name: "F",  freq: 87.31 },
-  { name: "G",  freq: 98 },    { name: "Am", freq: 110 },
-  { name: "D",  freq: 73.42 }, { name: "E",  freq: 82.41 },
-];
-const ACCORDION_TREBLE = [
-  { name: "C",  freq: 261.63 }, { name: "D",  freq: 293.66 }, { name: "E",  freq: 329.63 },
-  { name: "F",  freq: 349.23 }, { name: "G",  freq: 392 },    { name: "A",  freq: 440 },
-  { name: "B",  freq: 493.88 }, { name: "C²", freq: 523.25 }, { name: "D²", freq: 587.33 },
-  { name: "E²", freq: 659.25 }, { name: "F²", freq: 698.46 }, { name: "G²", freq: 783.99 },
-];
-
-const INSTRUMENTS = [
-  { id: "piano",     label: "Piano",    emoji: "🎹", bg: "#FF6B8A" },
-  { id: "guitar",    label: "Guitarra", emoji: "🎸", bg: "#FFE033" },
-  { id: "trumpet",   label: "Trompeta", emoji: "🎺", bg: "#FF8C42" },
-  { id: "saxophone", label: "Saxofón",  emoji: "🎷", bg: "#C06BDB" },
-  { id: "violin",    label: "Violín",   emoji: "🎻", bg: "#5BAEFF" },
-  { id: "drums",     label: "Batería",  emoji: "🥁", bg: "#B8E04A" },
-  { id: "accordion", label: "Acordeón", emoji: "🪗", bg: "#5FD49A" },
-  { id: "marimba",   label: "Marimba",  emoji: "🎵", bg: "#5BC8F5" },
-];
-
-function usePressed() {
-  const [pressed, setPressed] = useState<string | null>(null);
-  const press = (key: string, fn: () => void) => {
-    fn();
-    setPressed(key);
-    setTimeout(() => setPressed(null), 180);
-  };
-  return { pressed, press };
+export interface MelodyNote {
+  freq:     number;
+  duration: number; // seconds
+  volume:   number; // 0–1
+  rest:     boolean;
 }
 
-// ─── Pet Drawing Display ──────────────────────────────────────────────────────
-function PetFrame({ dataUrl }: { dataUrl: string | null }) {
+/** Analyze canvas pixels → derive melody */
+export function generateMelody(dataUrl: string): Promise<MelodyNote[]> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const COLS = 16; // 16 time steps
+      const ROWS = 8;  // 8 pitch slots
+      const W = COLS * 4;
+      const H = ROWS * 4;
+
+      const cv = document.createElement("canvas");
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, W, H);
+      const { data } = ctx.getImageData(0, 0, W, H);
+
+      // ─ 1. Determine scale & root from average hue ──────────────────────
+      let hueSum = 0, inkCount = 0;
+      let totalBrightness = 0;
+
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i], g = data[i+1], b = data[i+2], a = data[i+3];
+        if (a < 10) continue;
+        const brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+        if (brightness > 0.94 && r > 238 && g > 232) continue; // skip background
+        inkCount++;
+        totalBrightness += brightness;
+        // hue
+        const rn = r/255, gn = g/255, bn = b/255;
+        const max = Math.max(rn,gn,bn), min = Math.min(rn,gn,bn);
+        if (max !== min) {
+          let h = 0;
+          const d = max - min;
+          if (max === rn)      h = ((gn-bn)/d + (gn < bn ? 6:0)) / 6;
+          else if (max === gn) h = ((bn-rn)/d + 2) / 6;
+          else                 h = ((rn-gn)/d + 4) / 6;
+          hueSum += h * 360;
+        }
+      }
+
+      if (inkCount < 8) {
+        // empty canvas — return a simple C-major arpeggio
+        const scale = SCALES.major;
+        const root  = ROOTS.C;
+        resolve(scale.map(s => ({
+          freq: root * Math.pow(2, s/12),
+          duration: 0.4, volume: 0.4, rest: false,
+        })));
+        return;
+      }
+
+      const avgHue    = hueSum / inkCount;
+      const avgBright = totalBrightness / inkCount;
+
+      // Hue → root note (0°–360° mapped to 7 notes)
+      const rootName  = ROOT_NAMES[Math.floor((avgHue / 360) * ROOT_NAMES.length) % ROOT_NAMES.length];
+      const rootHz    = ROOTS[rootName];
+
+      // Brightness → scale type
+      const scaleName = avgBright > 0.6 ? "major"
+                      : avgBright > 0.4 ? "pentatonic"
+                      : avgBright > 0.25 ? "dorian"
+                      : avgBright > 0.15 ? "minor"
+                      : "blues";
+      const scale = SCALES[scaleName];
+
+      // ─ 2. Build 16-step grid from pixel columns ──────────────────────
+      // For each column (time step), find the vertical centroid of ink pixels
+      // → maps to a note in the scale (high row = high note)
+      const notes: MelodyNote[] = [];
+
+      for (let col = 0; col < COLS; col++) {
+        const x0 = Math.floor((col / COLS) * W);
+        const x1 = Math.floor(((col+1) / COLS) * W);
+
+        let colInk = 0;
+        let rowWeightSum = 0;
+        let volSum = 0;
+
+        for (let row = 0; row < ROWS; row++) {
+          const y0 = Math.floor((row / ROWS) * H);
+          const y1 = Math.floor(((row+1) / ROWS) * H);
+          let cellInk = 0;
+
+          for (let px = x0; px < x1; px++) {
+            for (let py = y0; py < y1; py++) {
+              const idx = (py * W + px) * 4;
+              const r = data[idx], g = data[idx+1], b = data[idx+2], a = data[idx+3];
+              if (a < 10) continue;
+              const br = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+              if (br > 0.94 && r > 238 && g > 232) continue;
+              cellInk++;
+              volSum += 1 - br; // darker = louder
+            }
+          }
+
+          if (cellInk > 0) {
+            colInk += cellInk;
+            // inverted row: row 0 (top) = high note
+            rowWeightSum += (ROWS - 1 - row) * cellInk;
+          }
+        }
+
+        if (colInk === 0) {
+          notes.push({ freq: 0, duration: 0.25, volume: 0, rest: true });
+        } else {
+          const avgRow    = rowWeightSum / colInk;
+          const noteIndex = Math.round((avgRow / (ROWS - 1)) * (scale.length - 1));
+          const semitones = scale[Math.min(noteIndex, scale.length - 1)];
+          const freq      = rootHz * Math.pow(2, semitones / 12);
+          const volume    = Math.min(0.7, 0.25 + (volSum / colInk) * 0.8);
+          const density   = colInk / ((x1 - x0) * H);
+          const duration  = density > 0.3 ? 0.5 : 0.3;
+
+          notes.push({ freq, duration, volume, rest: false });
+        }
+      }
+
+      resolve(notes);
+    };
+    img.src = dataUrl;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────
+// INSTRUMENT SYNTH ENGINE
+// ─────────────────────────────────────────────────────────────────
+
+let _ctx: AudioContext | null = null;
+function getCtx() {
+  if (!_ctx) _ctx = new AudioContext();
+  return _ctx;
+}
+
+type InstrumentId = "piano" | "guitar" | "marimba" | "flute" | "bells" | "synthpad";
+
+function playNote(freq: number, vol: number, dur: number, inst: InstrumentId, startTime: number) {
+  const ctx = getCtx();
+  const gain = ctx.createGain();
+  gain.connect(ctx.destination);
+  gain.gain.setValueAtTime(0.001, startTime);
+
+  switch (inst) {
+    case "piano": {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      osc.connect(gain);
+      gain.gain.linearRampToValueAtTime(vol, startTime + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur);
+      osc.start(startTime); osc.stop(startTime + dur);
+      // add slight harmonic
+      const osc2 = ctx.createOscillator();
+      osc2.type = "triangle";
+      osc2.frequency.value = freq * 2;
+      const g2 = ctx.createGain(); g2.gain.value = 0.12;
+      osc2.connect(g2); g2.connect(gain);
+      osc2.start(startTime); osc2.stop(startTime + dur);
+      break;
+    }
+    case "guitar": {
+      const osc = ctx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.value = freq;
+      const filt = ctx.createBiquadFilter();
+      filt.type = "lowpass"; filt.frequency.value = 1800;
+      osc.connect(filt); filt.connect(gain);
+      gain.gain.linearRampToValueAtTime(vol * 0.9, startTime + 0.005);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur * 0.8);
+      osc.start(startTime); osc.stop(startTime + dur);
+      break;
+    }
+    case "marimba": {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.linearRampToValueAtTime(vol, startTime + 0.003);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.55);
+      osc.connect(gain); osc.start(startTime); osc.stop(startTime + 0.6);
+      break;
+    }
+    case "flute": {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      // vibrato
+      const vib = ctx.createOscillator(); vib.frequency.value = 5.5;
+      const vibG = ctx.createGain(); vibG.gain.value = freq * 0.012;
+      vib.connect(vibG); vibG.connect(osc.frequency);
+      osc.connect(gain);
+      gain.gain.linearRampToValueAtTime(vol * 0.7, startTime + 0.06);
+      gain.gain.setValueAtTime(vol * 0.7, startTime + dur - 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur);
+      vib.start(startTime); vib.stop(startTime + dur);
+      osc.start(startTime); osc.stop(startTime + dur);
+      break;
+    }
+    case "bells": {
+      [1, 2.756, 5.404].forEach((ratio, i) => {
+        const o = ctx.createOscillator();
+        o.type = "sine";
+        o.frequency.value = freq * ratio;
+        const g = ctx.createGain();
+        g.gain.value = i === 0 ? vol : vol * 0.15;
+        o.connect(g); g.connect(gain);
+        o.start(startTime); o.stop(startTime + dur * 1.6);
+      });
+      gain.gain.linearRampToValueAtTime(1, startTime + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur * 1.6);
+      break;
+    }
+    case "synthpad": {
+      [1, 1.005, 0.5].forEach((ratio) => {
+        const o = ctx.createOscillator();
+        o.type = "sawtooth";
+        o.frequency.value = freq * ratio;
+        const filt = ctx.createBiquadFilter();
+        filt.type = "lowpass"; filt.frequency.value = 900;
+        o.connect(filt); filt.connect(gain);
+        o.start(startTime); o.stop(startTime + dur + 0.3);
+      });
+      gain.gain.linearRampToValueAtTime(vol * 0.5, startTime + 0.12);
+      gain.gain.setValueAtTime(vol * 0.5, startTime + dur - 0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + dur + 0.3);
+      break;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// INSTRUMENT CONFIG
+// ─────────────────────────────────────────────────────────────────
+
+const INSTRUMENTS: { id: InstrumentId; label: string; emoji: string; bg: string }[] = [
+  { id: "piano",    label: "Piano",     emoji: "🎩", bg: "#FF6B8A" },
+  { id: "guitar",   label: "Guitarra",  emoji: "🎸", bg: "#FFE033" },
+  { id: "marimba",  label: "Marimba",   emoji: "🎵", bg: "#B8E04A" },
+  { id: "flute",    label: "Flauta",    emoji: "🎺", bg: "#5BC8F5" },
+  { id: "bells",    label: "Campanas",  emoji: "🔔", bg: "#FFE033" },
+  { id: "synthpad", label: "Synth Pad", emoji: "🌟", bg: "#C06BDB" },
+];
+
+// ─────────────────────────────────────────────────────────────────
+// VISUALIZER — shows which note is playing in the grid
+// ─────────────────────────────────────────────────────────────────
+
+const NOTE_COLORS = [
+  "#FF6B8A","#FF8C42","#FFE033","#B8E04A",
+  "#5BC8F5","#5BAEFF","#C06BDB","#5FD49A",
+];
+
+function MelodyGrid({ notes, activeStep }: { notes: MelodyNote[]; activeStep: number }) {
+  const ROWS = 8;
   return (
     <div style={{
-      width: "120px", height: "120px",
-      background: dataUrl ? "transparent" : "#FFFBF2",
-      border: "4px solid #1A1A1A",
-      borderRadius: "16px",
-      boxShadow: "4px 4px 0 #1A1A1A",
-      overflow: "hidden",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      flexShrink: 0,
+      display: "grid",
+      gridTemplateColumns: `repeat(${notes.length}, 1fr)`,
+      gridTemplateRows: `repeat(${ROWS}, 1fr)`,
+      gap: "2px",
+      width: "100%",
+      height: "100%",
     }}>
-      {dataUrl ? (
-        <img src={dataUrl} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-      ) : (
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "2rem" }}>🎨</div>
-          <div style={{ fontSize: "0.7rem", color: "#888", fontFamily: "'Chewy',cursive" }}>Dibuja primero</div>
-        </div>
+      {Array.from({ length: ROWS }).map((_, row) =>
+        notes.map((note, col) => {
+          // Which row does this note's pitch land on?
+          const noteRow = note.rest ? -1 : Math.round(
+            (1 - (note.volume - 0.25) / 0.45) * (ROWS - 1)
+          );
+          const isActive = col === activeStep;
+          const hasNote  = !note.rest && noteRow === row;
+
+          return (
+            <div
+              key={`${row}-${col}`}
+              style={{
+                borderRadius: "4px",
+                background:
+                  isActive && hasNote ? NOTE_COLORS[row % NOTE_COLORS.length]
+                  : isActive          ? "rgba(255,255,255,0.25)"
+                  : hasNote           ? `${NOTE_COLORS[row % NOTE_COLORS.length]}99`
+                  : "rgba(255,255,255,0.08)",
+                border: hasNote ? "2px solid #1A1A1A" : "1px solid rgba(0,0,0,0.1)",
+                transform: isActive && hasNote ? "scale(1.08)" : "none",
+                transition: "all 0.08s",
+              }}
+            />
+          );
+        })
       )}
     </div>
   );
 }
 
-// ─── Instrument selector cards ────────────────────────────────────────────────
-function InstrumentCards({ active, onSelect }: { active: number; onSelect: (i: number) => void }) {
-  return (
-    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-      {INSTRUMENTS.map((ins, i) => (
-        <button
-          key={ins.id}
-          onClick={() => onSelect(i)}
-          style={{
-            width: "72px", height: "72px",
-            borderRadius: "16px",
-            background: active === i ? ins.bg : "#FFFBF2",
-            border: active === i ? "4px solid #1A1A1A" : "3px solid #1A1A1A",
-            cursor: "pointer",
-            display: "flex", flexDirection: "column",
-            alignItems: "center", justifyContent: "center", gap: "2px",
-            boxShadow: active === i ? "2px 2px 0 #1A1A1A" : "4px 4px 0 #1A1A1A",
-            transform: active === i ? "translate(2px,2px)" : "none",
-            transition: "all 0.1s",
-            fontFamily: "'Chewy',cursive",
-          }}
-        >
-          <span style={{ fontSize: "1.6rem", lineHeight: 1 }}>{ins.emoji}</span>
-          <span style={{ fontSize: "0.6rem", color: "#1A1A1A" }}>{ins.label}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
+// ─────────────────────────────────────────────────────────────────
+// MAIN COMPONENT
+// ─────────────────────────────────────────────────────────────────
 
-// ─── Piano Panel ──────────────────────────────────────────────────────────────
-function PianoPanel() {
-  const { pressed, press } = usePressed();
-  const W = 50;
-  const KEY_COLORS = ["#FF6B8A","#FF8C42","#FFE033","#B8E04A","#5BC8F5","#5BAEFF","#C06BDB","#5FD49A"];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
-      <span style={{ fontSize: "1rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>🎹 ¡Toca las teclas!</span>
-      <div style={{
-        position: "relative", height: "100px",
-        width: `${NOTES_C4.length * (W + 4)}px`,
-        background: "#FFFBF2", border: "3px solid #1A1A1A",
-        borderRadius: "8px", padding: "4px",
-        boxShadow: "4px 4px 0 #1A1A1A",
-      }}>
-        {NOTES_C4.map((freq, i) => (
-          <button key={NOTE_NAMES[i]}
-            onMouseDown={() => press(NOTE_NAMES[i], () => piano(freq))}
-            onTouchStart={() => press(NOTE_NAMES[i], () => piano(freq))}
-            style={{
-              position: "absolute", left: `${i * (W + 4) + 4}px`, top: "4px",
-              width: `${W}px`, height: "84px",
-              background: pressed === NOTE_NAMES[i] ? KEY_COLORS[i] : "#FFFBF2",
-              border: "3px solid #1A1A1A",
-              borderRadius: "4px", cursor: "pointer",
-              transform: pressed === NOTE_NAMES[i] ? "scaleY(0.95) translateY(3px)" : "none",
-              transition: "transform 0.08s",
-              display: "flex", alignItems: "flex-end", justifyContent: "center",
-              paddingBottom: "6px", zIndex: 1,
-              boxShadow: pressed === NOTE_NAMES[i] ? "none" : "0 3px 0 #1A1A1A",
-            }}>
-            <span style={{ fontSize: "0.8rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>{NOTE_NAMES[i]}</span>
-          </button>
-        ))}
-        {BLACK.map(b => (
-          <button key={b.name}
-            onMouseDown={() => press(b.name, () => piano(b.freq))}
-            onTouchStart={() => press(b.name, () => piano(b.freq))}
-            style={{
-              position: "absolute",
-              left: `${b.after * (W + 4) + W - 10 + 4}px`, top: "4px",
-              width: "22px", height: "56px",
-              background: pressed === b.name ? "#555" : "#1A1A1A",
-              border: "2px solid #000",
-              borderRadius: "0 0 4px 4px",
-              cursor: "pointer", zIndex: 2,
-              transform: pressed === b.name ? "scaleY(0.94) translateY(2px)" : "none",
-              transition: "transform 0.08s",
-            }} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Guitar Panel ─────────────────────────────────────────────────────────────
-function GuitarPanel() {
-  const { pressed, press } = usePressed();
-  const CHORD_COLORS = ["#FF6B8A","#FFE033","#B8E04A","#5BC8F5","#C06BDB","#FF8C42"];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-      <span style={{ fontSize: "1rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>🎸 Cuerdas & Acordes</span>
-      <div style={{ display: "flex", gap: "14px" }}>
-        <div style={{
-          background: "#FFFBF2", padding: "10px 12px",
-          border: "3px solid #1A1A1A", borderRadius: "12px",
-          boxShadow: "4px 4px 0 #1A1A1A", display: "flex",
-          flexDirection: "column", gap: "6px",
-        }}>
-          <span style={{ fontSize: "0.8rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive", textAlign: "center" }}>Cuerdas</span>
-          {GUITAR_STRINGS.map((s, i) => (
-            <button key={s.name}
-              onMouseDown={() => press(s.name, () => guitar(s.freq))}
-              style={{
-                height: "16px", width: "160px", borderRadius: "50px",
-                cursor: "pointer",
-                background: pressed === s.name ? CHORD_COLORS[i % CHORD_COLORS.length] : "#FFFBF2",
-                border: "2px solid #1A1A1A",
-                boxShadow: pressed === s.name ? "none" : "0 2px 0 #1A1A1A",
-                transition: "all 0.08s",
-                display: "flex", alignItems: "center", paddingLeft: "8px", gap: "6px",
-                fontFamily: "'Chewy',cursive",
-              }}>
-              <div style={{ height: "2px", flex: 1, background: "#1A1A1A", borderRadius: "1px" }} />
-              <span style={{ fontSize: "0.75rem", color: "#1A1A1A", minWidth: "24px" }}>{s.name}</span>
-            </button>
-          ))}
-        </div>
-        <div style={{
-          background: "#FFFBF2", padding: "10px 12px",
-          border: "3px solid #1A1A1A", borderRadius: "12px",
-          boxShadow: "4px 4px 0 #1A1A1A",
-        }}>
-          <span style={{ fontSize: "0.8rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive", display: "block", textAlign: "center", marginBottom: "6px" }}>Acordes</span>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-            {Object.entries(GUITAR_CHORDS).map(([name, freqs], i) => (
-              <button key={name}
-                onMouseDown={() => press(name, () => guitarChord(freqs))}
-                style={{
-                  padding: "8px 12px", borderRadius: "50px", cursor: "pointer",
-                  background: pressed === name ? CHORD_COLORS[i % CHORD_COLORS.length] : "#FFFBF2",
-                  border: "3px solid #1A1A1A",
-                  fontFamily: "'Chewy',cursive", fontSize: "1rem", color: "#1A1A1A",
-                  boxShadow: pressed === name ? "none" : "3px 3px 0 #1A1A1A",
-                  transform: pressed === name ? "translate(2px,2px)" : "none",
-                  transition: "all 0.08s",
-                }}>{name}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Trumpet Panel ────────────────────────────────────────────────────────────
-function TrumpetPanel() {
-  const { pressed, press } = usePressed();
-  const COLORS = ["#FF6B8A","#FFE033","#B8E04A","#5BC8F5","#FF8C42","#C06BDB","#5BAEFF","#5FD49A"];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-      <span style={{ fontSize: "1rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>🎺 Válvulas</span>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-        {TRUMPET_NOTES.map((n, i) => (
-          <button key={n.name}
-            onMouseDown={() => press(n.name, () => trumpet(n.freq))}
-            style={{
-              padding: "10px 14px", borderRadius: "14px", cursor: "pointer",
-              background: pressed === n.name ? COLORS[i] : "#FFFBF2",
-              border: "3px solid #1A1A1A",
-              fontFamily: "'Chewy',cursive", textAlign: "center",
-              boxShadow: pressed === n.name ? "none" : "3px 3px 0 #1A1A1A",
-              transform: pressed === n.name ? "translate(2px,2px)" : "none",
-              transition: "all 0.08s",
-            }}>
-            <div style={{ fontSize: "0.7rem", color: "#555" }}>{n.label}</div>
-            <div style={{ fontSize: "1rem", color: "#1A1A1A" }}>{n.name}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Sax Panel ────────────────────────────────────────────────────────────────
-function SaxPanel() {
-  const { pressed, press } = usePressed();
-  const COLORS = ["#FF6B8A","#5BAEFF","#B8E04A","#C06BDB","#FFE033","#FF8C42","#5FD49A","#5BC8F5","#FF6B8A","#5BAEFF","#B8E04A","#FFE033"];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-      <span style={{ fontSize: "1rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>🎷 Llaves del saxofón</span>
-      <div style={{
-        background: "#FFFBF2", padding: "12px 14px",
-        border: "3px solid #1A1A1A", borderRadius: "16px",
-        boxShadow: "4px 4px 0 #1A1A1A",
-      }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: "8px" }}>
-          {SAX_KEYS.map((k, i) => (
-            <button key={k.name}
-              onMouseDown={() => press(k.name, () => sax(k.freq))}
-              style={{
-                width: "44px", height: "44px", borderRadius: "50%", cursor: "pointer",
-                background: pressed === k.name ? COLORS[i] : "#FFFBF2",
-                border: "3px solid #1A1A1A",
-                fontFamily: "'Chewy',cursive", fontSize: "0.7rem", color: "#1A1A1A",
-                boxShadow: pressed === k.name ? "none" : "3px 3px 0 #1A1A1A",
-                transform: pressed === k.name ? "translate(2px,2px)" : "none",
-                transition: "all 0.1s",
-              }}>{k.name}</button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Violin Panel ─────────────────────────────────────────────────────────────
-function ViolinPanel() {
-  const { pressed, press } = usePressed();
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-      <span style={{ fontSize: "1rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>🎻 Desliza para tocar</span>
-      <div style={{
-        display: "flex", gap: "12px", alignItems: "center",
-        background: "#FFFBF2", padding: "12px 18px",
-        border: "3px solid #1A1A1A", borderRadius: "16px",
-        boxShadow: "4px 4px 0 #1A1A1A",
-      }}>
-        {VIOLIN_STRINGS.map((s) => (
-          <div key={s.name} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
-            <span style={{ fontSize: "0.85rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>{s.name}</span>
-            <button
-              onMouseDown={() => press(s.name, () => violin(s.freq))}
-              style={{
-                width: "40px", height: "96px", borderRadius: "20px",
-                background: pressed === s.name ? s.color : "#FFFBF2",
-                border: "3px solid #1A1A1A",
-                cursor: "ns-resize", position: "relative",
-                boxShadow: pressed === s.name ? "none" : "3px 3px 0 #1A1A1A",
-                transform: pressed === s.name ? "translate(2px,2px)" : "none",
-                transition: "all 0.1s",
-              }}>
-              <div style={{ position: "absolute", left: "50%", top: "8px", bottom: "8px", width: "2px", background: "#1A1A1A", transform: "translateX(-50%)", borderRadius: "1px" }} />
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Drums Panel ──────────────────────────────────────────────────────────────
-function DrumsPanel() {
-  const { pressed, press } = usePressed();
-  const PADS = [
-    { id: "crash", label: "Crash", fn: () => playNoise(0.35, 0.35, 3000), color: "#FFE033", w: 70, h: 14 },
-    { id: "hihat", label: "Hi-hat", fn: hihat, color: "#FF6B8A", w: 56, h: 14 },
-    { id: "ride",  label: "Ride",  fn: () => playNoise(0.4, 0.28, 5000), color: "#C06BDB", w: 60, h: 14 },
-    { id: "tom1",  label: "Tom 1", fn: () => tom(220), color: "#5BAEFF", w: 62, h: 50 },
-    { id: "tom2",  label: "Tom 2", fn: () => tom(160), color: "#5BC8F5", w: 68, h: 54 },
-    { id: "snare", label: "Snare", fn: snare, color: "#FF8C42", w: 76, h: 60 },
-    { id: "kick",  label: "Kick",  fn: kick,  color: "#B8E04A", w: 100, h: 80 },
-  ];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-      <span style={{ fontSize: "1rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>🥁 Kit de batería</span>
-      <div style={{
-        background: "#FFFBF2", padding: "12px 14px",
-        border: "3px solid #1A1A1A", borderRadius: "16px",
-        boxShadow: "4px 4px 0 #1A1A1A",
-      }}>
-        <div style={{ display: "flex", gap: "12px", justifyContent: "center", marginBottom: "8px" }}>
-          {PADS.slice(0, 3).map(p => (
-            <button key={p.id}
-              onMouseDown={() => press(p.id, p.fn)}
-              style={{
-                width: `${p.w}px`, height: `${p.h}px`, borderRadius: "50%",
-                cursor: "pointer",
-                background: pressed === p.id ? p.color : "#FFFBF2",
-                border: "3px solid #1A1A1A",
-                fontFamily: "'Chewy',cursive", fontSize: "0.65rem", color: "#1A1A1A",
-                transform: pressed === p.id ? "scaleY(0.88)" : "none",
-                transition: "all 0.07s",
-                boxShadow: pressed === p.id ? "none" : "0 3px 0 #1A1A1A",
-              }}>{p.label}</button>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: "10px", alignItems: "flex-end", justifyContent: "center", marginBottom: "8px" }}>
-          {PADS.slice(3, 6).map(p => (
-            <button key={p.id}
-              onMouseDown={() => press(p.id, p.fn)}
-              style={{
-                width: `${p.w}px`, height: `${p.h}px`, borderRadius: "50%",
-                cursor: "pointer",
-                background: pressed === p.id ? p.color : "#FFFBF2",
-                border: "3px solid #1A1A1A",
-                fontFamily: "'Chewy',cursive", fontSize: "0.8rem", color: "#1A1A1A",
-                transform: pressed === p.id ? "scale(0.92)" : "scale(1)",
-                transition: "all 0.08s",
-                boxShadow: pressed === p.id ? "none" : "3px 3px 0 #1A1A1A",
-              }}>{p.label}</button>
-          ))}
-        </div>
-        <div style={{ display: "flex", justifyContent: "center" }}>
-          <button
-            onMouseDown={() => press("kick", kick)}
-            style={{
-              width: "100px", height: "80px", borderRadius: "50%", cursor: "pointer",
-              background: pressed === "kick" ? "#B8E04A" : "#FFFBF2",
-              border: "4px solid #1A1A1A",
-              fontFamily: "'Chewy',cursive", fontSize: "1rem", color: "#1A1A1A",
-              transform: pressed === "kick" ? "scale(0.92)" : "scale(1)",
-              transition: "all 0.08s",
-              boxShadow: pressed === "kick" ? "none" : "4px 4px 0 #1A1A1A",
-            }}>Kick 💥</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Accordion Panel ──────────────────────────────────────────────────────────
-function AccordionPanel() {
-  const { pressed, press } = usePressed();
-  const BASS_COLORS = ["#FF6B8A","#FFE033","#B8E04A","#5BC8F5","#FF8C42","#C06BDB"];
-  const TREBLE_COLORS = ["#FF6B8A","#5BAEFF","#B8E04A","#C06BDB","#FFE033","#FF8C42","#5FD49A","#5BC8F5","#FF6B8A","#5BAEFF","#B8E04A","#FFE033"];
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-      <span style={{ fontSize: "1rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>🪗 Acordeón</span>
-      <div style={{ display: "flex", gap: "12px" }}>
-        <div style={{
-          background: "#FFFBF2", padding: "10px 10px",
-          border: "3px solid #1A1A1A", borderRadius: "12px",
-          boxShadow: "3px 3px 0 #1A1A1A", display: "flex",
-          flexDirection: "column", gap: "6px", alignItems: "center",
-        }}>
-          <span style={{ fontSize: "0.75rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>Bajos</span>
-          {ACCORDION_BASS.map((b, i) => (
-            <button key={b.name}
-              onMouseDown={() => press("b"+b.name, () => accordion(b.freq))}
-              style={{
-                width: "44px", height: "38px", borderRadius: "50%", cursor: "pointer",
-                background: pressed === "b"+b.name ? BASS_COLORS[i] : "#FFFBF2",
-                border: "3px solid #1A1A1A",
-                fontFamily: "'Chewy',cursive", fontSize: "0.8rem", color: "#1A1A1A",
-                boxShadow: pressed === "b"+b.name ? "none" : "2px 2px 0 #1A1A1A",
-                transform: pressed === "b"+b.name ? "translate(1px,1px)" : "none",
-                transition: "all 0.1s",
-              }}>{b.name}</button>
-          ))}
-        </div>
-        <div style={{
-          background: "#FFFBF2", padding: "10px 10px",
-          border: "3px solid #1A1A1A", borderRadius: "12px",
-          boxShadow: "3px 3px 0 #1A1A1A",
-        }}>
-          <span style={{ fontSize: "0.75rem", color: "#1A1A1A", display: "block", textAlign: "center", marginBottom: "6px", fontFamily: "'Chewy',cursive" }}>Agudos</span>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: "5px" }}>
-            {ACCORDION_TREBLE.map((t, i) => (
-              <button key={t.name+i}
-                onMouseDown={() => press("t"+t.name+i, () => accordion(t.freq))}
-                style={{
-                  width: "40px", height: "34px", borderRadius: "50%", cursor: "pointer",
-                  background: pressed === "t"+t.name+i ? TREBLE_COLORS[i%12] : "#FFFBF2",
-                  border: "2px solid #1A1A1A",
-                  fontFamily: "'Chewy',cursive", fontSize: "0.65rem", color: "#1A1A1A",
-                  boxShadow: pressed === "t"+t.name+i ? "none" : "2px 2px 0 #1A1A1A",
-                  transform: pressed === "t"+t.name+i ? "translate(1px,1px)" : "none",
-                  transition: "all 0.1s",
-                }}>{t.name}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Marimba Panel ────────────────────────────────────────────────────────────
-function MarimbaPanel() {
-  const { pressed, press } = usePressed();
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
-      <span style={{ fontSize: "1rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>🎵 Marimba</span>
-      <div style={{
-        background: "#FFFBF2", padding: "12px 16px",
-        border: "3px solid #1A1A1A", borderRadius: "16px",
-        boxShadow: "4px 4px 0 #1A1A1A",
-        display: "flex", gap: "6px", alignItems: "flex-end",
-      }}>
-        {MARIMBA_NOTES.map((n) => (
-          <button key={n.name}
-            onMouseDown={() => press(n.name, () => marimba(n.freq))}
-            style={{
-              width: "48px", height: `${n.h}px`, borderRadius: "8px", cursor: "pointer",
-              background: pressed === n.name ? n.color : "#FFFBF2",
-              border: "3px solid #1A1A1A",
-              fontFamily: "'Chewy',cursive", fontSize: "0.8rem", color: "#1A1A1A",
-              display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: "6px",
-              transform: pressed === n.name ? "scaleY(0.93) translateY(4px)" : "none",
-              transition: "all 0.09s",
-              boxShadow: pressed === n.name ? "none" : "3px 3px 0 #1A1A1A",
-            }}>{n.name}</button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
 export function PlayMode({ drawingDataUrl }: { drawingDataUrl: string | null }) {
-  const [activeInst, setActiveInst] = useState(0);
+  const [melody,      setMelody]      = useState<MelodyNote[]>([]);
+  const [isPlaying,   setIsPlaying]   = useState(false);
+  const [activeStep,  setActiveStep]  = useState(-1);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [activeInst,  setActiveInst]  = useState(0);
+  const [tempo,       setTempo]       = useState(120); // BPM
+  const [loop,        setLoop]        = useState(true);
+
+  const stopRef      = useRef(false);
+  const timeoutRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Analyze drawing on mount / when drawing changes
+  useEffect(() => {
+    if (!drawingDataUrl) return;
+    setIsAnalyzing(true);
+    generateMelody(drawingDataUrl).then(notes => {
+      setMelody(notes);
+      setIsAnalyzing(false);
+    });
+  }, [drawingDataUrl]);
+
   const inst = INSTRUMENTS[activeInst];
 
-  function renderPanel() {
-    switch (inst.id) {
-      case "piano":     return <PianoPanel />;
-      case "guitar":    return <GuitarPanel />;
-      case "trumpet":   return <TrumpetPanel />;
-      case "saxophone": return <SaxPanel />;
-      case "violin":    return <ViolinPanel />;
-      case "drums":     return <DrumsPanel />;
-      case "accordion": return <AccordionPanel />;
-      case "marimba":   return <MarimbaPanel />;
-      default:          return <PianoPanel />;
+  const stop = useCallback(() => {
+    stopRef.current = true;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    setIsPlaying(false);
+    setActiveStep(-1);
+  }, []);
+
+  const play = useCallback(() => {
+    if (!melody.length) return;
+    const ctx = getCtx();
+    if (ctx.state === "suspended") ctx.resume();
+
+    stopRef.current = false;
+    setIsPlaying(true);
+
+    const beatMs = (60 / tempo) * 1000; // ms per beat
+
+    let step = 0;
+    function tick() {
+      if (stopRef.current) return;
+      const note = melody[step];
+      setActiveStep(step);
+
+      if (!note.rest) {
+        const now = ctx.currentTime;
+        playNote(note.freq, note.volume, note.duration * (120 / tempo), inst.id, now);
+      }
+
+      step++;
+      if (step >= melody.length) {
+        if (loop) {
+          step = 0;
+          timeoutRef.current = setTimeout(tick, beatMs * 0.5);
+        } else {
+          setIsPlaying(false);
+          setActiveStep(-1);
+        }
+        return;
+      }
+
+      timeoutRef.current = setTimeout(tick, beatMs * (note.rest ? 0.5 : note.duration * (120/tempo) * 1.05));
     }
-  }
+
+    tick();
+  }, [melody, tempo, inst, loop]);
+
+  // Auto-play when melody is ready
+  useEffect(() => {
+    if (melody.length && !isPlaying) {
+      // small delay so the UI settles first
+      const t = setTimeout(() => play(), 400);
+      return () => clearTimeout(t);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [melody]);
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden" style={{ fontFamily: "'Chewy', cursive" }}>
+    <div
+      className="flex-1 flex flex-col overflow-hidden"
+      style={{ fontFamily: "'Chewy', cursive", background: "#5BC8F5" }}
+    >
 
-      {/* Top section: pet + instrument selector */}
+      {/* ─ Top bar: pet + instruments ─ */}
       <div style={{
         background: "#5BC8F5",
-        padding: "14px 20px",
-        display: "flex", alignItems: "center", gap: "20px",
         borderBottom: "3px solid #1A1A1A",
-        flexWrap: "wrap",
+        padding: "10px 16px",
+        display: "flex", alignItems: "center", gap: "14px",
+        flexShrink: 0, flexWrap: "wrap",
       }}>
-        {/* Pet drawing */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "6px" }}>
-          <PetFrame dataUrl={drawingDataUrl} />
-          <span style={{ fontSize: "0.8rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>tu mascota 🐾</span>
-        </div>
-
-        {/* Active instrument badge */}
+        {/* Pet thumbnail */}
         <div style={{
-          background: inst.bg, border: "3px solid #1A1A1A",
-          borderRadius: "50px", padding: "6px 18px",
+          width: "64px", height: "64px",
+          background: "#FFFBF2",
+          border: "3px solid #1A1A1A", borderRadius: "14px",
+          overflow: "hidden", flexShrink: 0,
           boxShadow: "3px 3px 0 #1A1A1A",
-          display: "flex", alignItems: "center", gap: "8px",
+          display: "flex", alignItems: "center", justifyContent: "center",
         }}>
-          <span style={{ fontSize: "1.6rem" }}>{inst.emoji}</span>
-          <span style={{ fontSize: "1.1rem", color: "#1A1A1A", fontFamily: "'Chewy',cursive" }}>Tocando: {inst.label}</span>
+          {drawingDataUrl
+            ? <img src={drawingDataUrl} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+            : <span style={{ fontSize: "1.6rem" }}>🎨</span>}
         </div>
 
-        {/* Instrument cards */}
-        <div style={{ flex: 1 }}>
-          <InstrumentCards active={activeInst} onSelect={setActiveInst} />
+        <div style={{ display: "flex", flexDirection: "column", gap: "2px", flexShrink: 0 }}>
+          <span style={{ fontSize: "0.85rem", color: "#1A1A1A" }}>🎵 Melodía de tu mascota</span>
+          {isAnalyzing && <span style={{ fontSize: "0.7rem", color: "#555" }}>⏳ Analizando dibujo...</span>}
+          {!isAnalyzing && melody.length > 0 && (
+            <span style={{ fontSize: "0.7rem", color: "#555" }}>
+              {melody.filter(n => !n.rest).length} notas generadas
+            </span>
+          )}
+        </div>
+
+        {/* Instrument selector */}
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", flex: 1, justifyContent: "center" }}>
+          {INSTRUMENTS.map((ins, i) => {
+            const active = activeInst === i;
+            return (
+              <button key={ins.id} onClick={() => { stop(); setActiveInst(i); }} style={{
+                padding: "7px 14px", borderRadius: "50px",
+                background: active ? ins.bg : "#FFFBF2",
+                border: active ? "4px solid #1A1A1A" : "3px solid #1A1A1A",
+                cursor: "pointer", fontFamily: "'Chewy',cursive", fontSize: "0.9rem",
+                color: "#1A1A1A",
+                boxShadow: active ? "2px 2px 0 #1A1A1A" : "3px 3px 0 #1A1A1A",
+                transform: active ? "translate(1px,1px)" : "none",
+                transition: "all 0.1s",
+                display: "flex", alignItems: "center", gap: "5px",
+              }}>
+                <span>{ins.emoji}</span><span>{ins.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Bottom: instrument panel */}
+      {/* ─ Center: melody grid ─ */}
       <div style={{
-        flex: 1,
-        background: "#FFE033",
-        borderTop: "3px solid #1A1A1A",
-        padding: "16px 24px",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        overflow: "auto",
+        flex: 1, padding: "16px",
+        display: "flex", flexDirection: "column", gap: "12px",
+        overflow: "hidden",
       }}>
-        {renderPanel()}
+        <div style={{
+          flex: 1,
+          background: "rgba(0,0,0,0.15)",
+          border: "3px solid #1A1A1A",
+          borderRadius: "16px",
+          padding: "12px",
+          boxShadow: "4px 4px 0 #1A1A1A",
+          overflow: "hidden",
+        }}>
+          {isAnalyzing ? (
+            <div style={{
+              height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
+              flexDirection: "column", gap: "10px",
+            }}>
+              <span style={{ fontSize: "2.5rem" }}>🔍</span>
+              <span style={{ fontSize: "1rem", color: "#FFFBF2", fontFamily: "'Chewy',cursive" }}>
+                Analizando tu dibujo...
+              </span>
+            </div>
+          ) : melody.length > 0 ? (
+            <MelodyGrid notes={melody} activeStep={activeStep} />
+          ) : (
+            <div style={{
+              height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <span style={{ color: "#FFFBF2", fontFamily: "'Chewy',cursive" }}>Ve a Dibujar primero 🎨</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ─ Bottom controls ─ */}
+      <div style={{
+        background: "#FFFBF2",
+        borderTop: "3px solid #1A1A1A",
+        padding: "10px 20px",
+        display: "flex", alignItems: "center", gap: "16px",
+        flexShrink: 0, flexWrap: "wrap",
+        boxShadow: "0 -2px 0 #1A1A1A",
+      }}>
+
+        {/* Play / Stop */}
+        <button
+          onClick={isPlaying ? stop : play}
+          disabled={!melody.length || isAnalyzing}
+          style={{
+            width: "56px", height: "56px", borderRadius: "50%",
+            background: isPlaying ? "#FF6B8A" : "#B8E04A",
+            border: "3px solid #1A1A1A",
+            cursor: melody.length ? "pointer" : "not-allowed",
+            fontSize: "1.6rem",
+            boxShadow: "4px 4px 0 #1A1A1A",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "all 0.1s",
+          }}
+          onMouseDown={e => { e.currentTarget.style.transform = "translate(2px,2px)"; e.currentTarget.style.boxShadow = "2px 2px 0 #1A1A1A"; }}
+          onMouseUp={e =>   { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = "4px 4px 0 #1A1A1A"; }}
+        >
+          {isPlaying ? "⏹" : "▶️"}
+        </button>
+
+        {/* Tempo */}
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: "160px" }}>
+          <span style={{ fontSize: "0.9rem", color: "#1A1A1A", flexShrink: 0 }}>Tempo</span>
+          <input
+            type="range" min={60} max={200} step={5}
+            value={tempo}
+            onChange={e => { stop(); setTempo(Number(e.target.value)); }}
+            style={{ flex: 1, accentColor: inst.bg, cursor: "pointer" }}
+          />
+          <span style={{
+            background: inst.bg, border: "2px solid #1A1A1A",
+            borderRadius: "50px", padding: "2px 12px",
+            fontSize: "0.9rem", color: "#1A1A1A", minWidth: "50px", textAlign: "center",
+            flexShrink: 0,
+          }}>{tempo}</span>
+        </div>
+
+        {/* Loop toggle */}
+        <button
+          onClick={() => setLoop(l => !l)}
+          style={{
+            padding: "8px 16px", borderRadius: "50px",
+            background: loop ? inst.bg : "#FFFBF2",
+            border: loop ? "4px solid #1A1A1A" : "3px solid #1A1A1A",
+            cursor: "pointer", fontFamily: "'Chewy',cursive",
+            fontSize: "0.9rem", color: "#1A1A1A",
+            boxShadow: loop ? "2px 2px 0 #1A1A1A" : "3px 3px 0 #1A1A1A",
+            transform: loop ? "translate(1px,1px)" : "none",
+            transition: "all 0.1s",
+            display: "flex", alignItems: "center", gap: "6px",
+          }}
+        >
+          <span>🔁</span>
+          <span>Loop {loop ? "ON" : "OFF"}</span>
+        </button>
+
+        {/* Instrument badge */}
+        <div style={{
+          background: inst.bg, border: "3px solid #1A1A1A",
+          borderRadius: "50px", padding: "6px 16px",
+          boxShadow: "3px 3px 0 #1A1A1A",
+          display: "flex", alignItems: "center", gap: "6px",
+        }}>
+          <span style={{ fontSize: "1.2rem" }}>{inst.emoji}</span>
+          <span style={{ fontSize: "0.9rem", color: "#1A1A1A" }}>{inst.label}</span>
+        </div>
       </div>
     </div>
   );
