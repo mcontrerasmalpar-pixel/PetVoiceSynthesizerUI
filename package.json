@@ -8,6 +8,7 @@
     "dev": "vite"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.49.0",
     "@mediapipe/hands": "0.4.1675469240",
     "@mediapipe/camera_utils": "0.3.1675466862",
     "@emotion/react": "11.14.0",
