@@ -23,15 +23,15 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
   const handleSubmit = async () => {
     setError(null);
-    if (!email || !password) { setError("Llena email y contraseña 😢"); return; }
-    if (isRegister && !username) { setError("Pon un nombre de usuario 🧐"); return; }
+    if (!email || !password) { setError("Please fill in email and password 😢"); return; }
+    if (isRegister && !username) { setError("Please enter a username 🧐"); return; }
     setLoading(true);
     try {
       if (isRegister) {
         const { user, error: err } = await signUp(email, password, username);
         if (err) { setError(err); return; }
         if (user) onLogin(username || email.split("@")[0]);
-        else setError("Revisa tu email para confirmar la cuenta 📧");
+        else setError("Check your email to confirm your account 📧");
       } else {
         const { user, error: err } = await signIn(email, password);
         if (err) { setError(err); return; }
@@ -100,7 +100,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             Doodio
           </h1>
           <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "#5A3A00", fontFamily: "'Chewy', cursive" }}>
-            {isRegister ? "¡Crea tu cuenta! 🌟" : "Doodle it. Hear it. 👋"}
+            {isRegister ? "Create your account! 🌟" : "Doodle it. Hear it. 👋"}
           </p>
         </div>
 
@@ -113,14 +113,14 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           />
           {isRegister && (
             <input
-              style={inputStyle} placeholder="👤 nombre de usuario"
+              style={inputStyle} placeholder="👤 username"
               value={username}
               onChange={e => { setUsername(e.target.value); setError(null); }}
               onKeyDown={e => e.key === "Enter" && handleSubmit()}
             />
           )}
           <input
-            style={inputStyle} type="password" placeholder="🔑 contraseña"
+            style={inputStyle} type="password" placeholder="🔑 password"
             value={password}
             onChange={e => { setPassword(e.target.value); setError(null); }}
             onKeyDown={e => e.key === "Enter" && handleSubmit()}
@@ -151,7 +151,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           onMouseDown={e => { if (!loading) { e.currentTarget.style.transform = "translate(2px,2px)"; e.currentTarget.style.boxShadow = "2px 2px 0 #1A1A1A"; }}}
           onMouseUp={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = loading ? "none" : "4px 4px 0 #1A1A1A"; }}
         >
-          {loading ? "⏳ Cargando..." : isRegister ? "¡Crear cuenta! 🎉" : "¡Entrar! 🎨"}
+          {loading ? "⏳ Loading..." : isRegister ? "Create account! 🎉" : "Let's go! 🎨"}
         </button>
 
         <button
@@ -163,7 +163,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             textUnderlineOffset: "3px",
           }}
         >
-          {isRegister ? "ya tengo cuenta →" : "¿primera vez? regístrate →"}
+          {isRegister ? "I already have an account →" : "First time? Sign up →"}
         </button>
       </div>
     </div>
