@@ -2,12 +2,12 @@ import { useState } from "react";
 import type { AnimalType } from "../../lib/supabase";
 
 const DOODLE_TYPES: { type: AnimalType; emoji: string; label: string }[] = [
-  { type: "cat",     emoji: "🐱", label: "Gato"    },
-  { type: "dog",     emoji: "🐶", label: "Perro"   },
-  { type: "bird",    emoji: "🐦", label: "Pájaro"  },
-  { type: "frog",    emoji: "🌱", label: "Árbol"   },
-  { type: "rabbit",  emoji: "🏠", label: "Casa"    },
-  { type: "hamster", emoji: "⭐", label: "Estrella" },
+  { type: "cat",     emoji: "🐱", label: "Cat"    },
+  { type: "dog",     emoji: "🐶", label: "Dog"   },
+  { type: "bird",    emoji: "🐦", label: "Bird"  },
+  { type: "frog",    emoji: "🌱", label: "Tree"   },
+  { type: "rabbit",  emoji: "🏠", label: "House"    },
+  { type: "hamster", emoji: "⭐", label: "Star" },
 ];
 
 interface SavePetModalProps {
@@ -38,7 +38,7 @@ export function SavePetModal({ drawingDataUrl, ownerName, onSave, onClose, savin
         display: "flex", flexDirection: "column", gap: "16px",
         fontFamily: "'Chewy', cursive",
       }}>
-        <h2 style={{ margin: 0, fontSize: "1.6rem", color: "#1A1A1A" }}>Guarda tu doodle 🎨</h2>
+        <h2 style={{ margin: 0, fontSize: "1.6rem", color: "#1A1A1A" }}>Save your doodle 🎨</h2>
 
         {/* Preview */}
         <div style={{ display: "flex", justifyContent: "center" }}>
@@ -54,11 +54,11 @@ export function SavePetModal({ drawingDataUrl, ownerName, onSave, onClose, savin
 
         {/* Name */}
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          <label style={{ fontSize: "1rem", color: "#1A1A1A" }}>Dale un nombre</label>
+          <label style={{ fontSize: "1rem", color: "#1A1A1A" }}>Give it a name</label>
           <input
             value={name}
             onChange={e => setName(e.target.value)}
-            placeholder="ej. Mi sol, Cosmo, Luna..."
+            placeholder="e.g. My Sun, Cosmo, Luna..."
             maxLength={24}
             style={{
               padding: "10px 14px",
@@ -71,7 +71,7 @@ export function SavePetModal({ drawingDataUrl, ownerName, onSave, onClose, savin
 
         {/* Doodle type */}
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-          <label style={{ fontSize: "1rem", color: "#1A1A1A" }}>¿Qué dibujaste?</label>
+          <label style={{ fontSize: "1rem", color: "#1A1A1A" }}>What did you draw?</label>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {DOODLE_TYPES.map(a => (
               <button
@@ -107,7 +107,7 @@ export function SavePetModal({ drawingDataUrl, ownerName, onSave, onClose, savin
               fontSize: "1rem", color: "#1A1A1A",
               boxShadow: "3px 3px 0 #1A1A1A",
             }}
-          >Cancelar</button>
+          >Cancel</button>
           <button
             onClick={() => name.trim() && onSave(name.trim(), animal)}
             disabled={!name.trim() || saving}
@@ -122,7 +122,7 @@ export function SavePetModal({ drawingDataUrl, ownerName, onSave, onClose, savin
               display: "flex", alignItems: "center", gap: "6px",
             }}
           >
-            {saving ? "⏳ Guardando..." : "✅ Guardar"}
+            {saving ? "⏳ Saving..." : "✅ Save"}
           </button>
         </div>
       </div>

@@ -101,6 +101,7 @@ let _masterBus: GainNode | null = null;
 
 function getCtx() {
   if (!_ctx) _ctx = new AudioContext();
+  if (_ctx.state === "suspended") _ctx.resume();
   return _ctx;
 }
 function getOutputNode(): AudioNode {
@@ -207,8 +208,8 @@ function MelodyGrid({notes,activeStep}:{notes:MelodyNote[];activeStep:number}) {
   );
 }
 
-// ─── Compact Pet Recorder ────────────────────────────────────────────────────
-function PetRecorder({ melody, instId, tempo }: {
+// Doodle Recorder
+function DoodleRecorder({ melody, instId, tempo }: {
   melody: MelodyNote[];
   instId: InstrumentId;
   tempo: number;
@@ -222,6 +223,10 @@ function PetRecorder({ melody, instId, tempo }: {
 
   const startRecording = async () => {
     try {
+      // Resume or create AudioContext inside user gesture to unblock autoplay
+      const ctx = getCtx();
+      if (ctx.state === "suspended") await ctx.resume();
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream);
       chunksRef.current = [];
@@ -284,17 +289,14 @@ function PetRecorder({ melody, instId, tempo }: {
     <div style={{ padding:"0 14px 10px", display:"flex", flexDirection:"column", gap:"6px" }}>
       <div style={{ height:"2px", background:"rgba(0,0,0,0.12)", borderRadius:"2px", marginBottom:"2px" }} />
 
-      {/* Row: Record + Remix side by side */}
       <div style={{ display:"flex", gap:"8px" }}>
-        {/* Record button */}
         <button
           onClick={recording ? stopRecording : startRecording}
           style={{ flex:1, padding:"8px 12px", borderRadius:"50px", background: recording ? "#FF6B8A" : "#FFFBF2", border: recording ? "3px solid #1A1A1A" : "2px solid #1A1A1A", cursor:"pointer", fontFamily:"'Chewy',cursive", fontSize:"0.9rem", color:"#1A1A1A", boxShadow: recording ? "2px 2px 0 #1A1A1A" : "3px 3px 0 #1A1A1A", transform: recording ? "translate(1px,1px)" : "none", transition:"all 0.1s", display:"flex", alignItems:"center", justifyContent:"center", gap:"6px" }}>
           <span style={{ fontSize:"0.75rem" }}>{recording ? "⏹" : "🔴"}</span>
-          <span>{recording ? "Stop" : "Record your pet"}</span>
+          <span>{recording ? "Stop" : "Record your voice"}</span>
         </button>
 
-        {/* Remix button — only shown after recording */}
         {audioBlob && !recording && (
           <button
             onClick={remixWithMelody}
@@ -306,11 +308,10 @@ function PetRecorder({ melody, instId, tempo }: {
         )}
       </div>
 
-      {/* Result — compact */}
       {remixURL && (
         <div style={{ background:"#B8E04A", border:"2px solid #1A1A1A", borderRadius:"12px", padding:"8px 12px", boxShadow:"3px 3px 0 #1A1A1A", display:"flex", alignItems:"center", gap:"8px" }}>
           <audio controls src={remixURL} style={{ flex:1, height:"28px" }} />
-          <a href={remixURL} download="pet-remix.webm" style={{ display:"flex", alignItems:"center", gap:"4px", padding:"6px 10px", borderRadius:"50px", background:"#FFFBF2", border:"2px solid #1A1A1A", fontFamily:"'Chewy',cursive", fontSize:"0.8rem", color:"#1A1A1A", boxShadow:"2px 2px 0 #1A1A1A", textDecoration:"none", flexShrink:0 }}>
+          <a href={remixURL} download="doodle-remix.webm" style={{ display:"flex", alignItems:"center", gap:"4px", padding:"6px 10px", borderRadius:"50px", background:"#FFFBF2", border:"2px solid #1A1A1A", fontFamily:"'Chewy',cursive", fontSize:"0.8rem", color:"#1A1A1A", boxShadow:"2px 2px 0 #1A1A1A", textDecoration:"none", flexShrink:0 }}>
             <span>⬇️</span><span>Save</span>
           </a>
         </div>
@@ -319,7 +320,7 @@ function PetRecorder({ melody, instId, tempo }: {
   );
 }
 
-// ─── PlayMode ────────────────────────────────────────────────────────────────
+// PlayMode
 interface PlayModeProps {
   drawingDataUrl:       string | null;
   onMelodyReady?:       (notes: MelodyNote[]) => void;
@@ -377,7 +378,6 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
     const notes = notesOverride ?? melodyRef.current;
     if (!notes.length) return;
     const ctx = getCtx();
-    if (ctx.state === "suspended") ctx.resume();
     stopRef.current = false;
     setIsPlaying(true); onPlayingChange?.(true);
     let step = 0;
@@ -386,7 +386,7 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
       const note = notes[step];
       const beatMs = (60 / tempoRef.current) * 1000;
       setActiveStep(step);
-      if (!note.rest) playNote(note.freq, note.volume, note.duration*(120/tempoRef.current), instIdRef.current, getCtx().currentTime);
+      if (!note.rest) playNote(note.freq, note.volume, note.duration*(120/tempoRef.current), instIdRef.current, ctx.currentTime);
       step++;
       if (step >= notes.length) {
         if (loopRef.current) { step=0; timeoutRef.current=setTimeout(tick, beatMs*0.4); }
@@ -414,6 +414,13 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
     const wasPlaying = !stopRef.current && isPlaying;
     stop(); setActiveInst(i); instIdRef.current = INSTRUMENTS[i].id;
     if (wasPlaying) setTimeout(()=>play(), 80);
+  };
+
+  const handlePlayClick = () => {
+    // must be inside user gesture so AudioContext resumes
+    const ctx = getCtx();
+    if (ctx.state === "suspended") ctx.resume().then(() => isPlaying ? stop() : play());
+    else isPlaying ? stop() : play();
   };
 
   return (
@@ -459,13 +466,13 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
         </div>
       </div>
 
-      {/* Compact pet recorder */}
-      <PetRecorder melody={melody} instId={INSTRUMENTS[activeInst].id} tempo={tempo} />
+      {/* Doodle recorder */}
+      <DoodleRecorder melody={melody} instId={INSTRUMENTS[activeInst].id} tempo={tempo} />
 
       {/* Footer */}
       <div style={{background:"#FFFBF2", borderTop:"3px solid #1A1A1A", padding:"10px 20px", display:"flex", alignItems:"center", gap:"14px", flexShrink:0, flexWrap:"wrap", boxShadow:"0 -2px 0 #1A1A1A"}}>
         <button
-          onClick={isPlaying ? stop : play}
+          onClick={handlePlayClick}
           disabled={!melody.length || isAnalyzing}
           style={{width:"56px", height:"56px", borderRadius:"50%", background: isPlaying ? "#FF6B8A" : "#B8E04A", border:"3px solid #1A1A1A", cursor: melody.length ? "pointer" : "not-allowed", fontSize:"1.6rem", boxShadow:"4px 4px 0 #1A1A1A", display:"flex", alignItems:"center", justifyContent:"center", transition:"all 0.1s"}}
           onMouseDown={e=>{e.currentTarget.style.transform="translate(2px,2px)";e.currentTarget.style.boxShadow="2px 2px 0 #1A1A1A";}}
@@ -486,7 +493,7 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
           <button onClick={onSavePet} style={{padding:"10px 20px", borderRadius:"50px", background:"#FF8C42", border:"4px solid #1A1A1A", cursor:"pointer", fontFamily:"'Chewy',cursive", fontSize:"0.95rem", color:"#1A1A1A", boxShadow:"4px 4px 0 #1A1A1A", display:"flex", alignItems:"center", gap:"6px"}}
             onMouseDown={e=>{e.currentTarget.style.transform="translate(2px,2px)";e.currentTarget.style.boxShadow="2px 2px 0 #1A1A1A";}}
             onMouseUp={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="4px 4px 0 #1A1A1A";}}>
-            <span>💾</span><span>Save pet</span>
+            <span>💾</span><span>Save doodle</span>
           </button>
         )}
         {savedPet && (
