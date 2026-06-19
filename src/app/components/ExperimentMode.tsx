@@ -6,12 +6,12 @@ interface GenreDef {
   color: string; textColor: string;
   oscType: OscillatorType;
   filterHz: number; reverbMix: number;
-  durMult: number;   // multiply original note duration
-  gapMult: number;   // multiply gap between notes
+  durMult: number;
+  gapMult: number;
   volMult: number;
   distortion: boolean;
   distAmount: number;
-  pitchShift: number; // semitone shift on top of original freq
+  pitchShift: number;
 }
 
 const GENRES: GenreDef[] = [
@@ -39,7 +39,6 @@ function semShift(freq: number, semitones: number) {
   return freq * Math.pow(2, semitones / 12);
 }
 
-// ─── Render the DRAWING's melody notes shaped by genre into an OfflineAudioContext ──
 async function renderBackingTrack(
   genre: GenreDef,
   melodyNotes: MelodyNote[],
@@ -49,7 +48,6 @@ async function renderBackingTrack(
   const length = Math.ceil(durationSec * sampleRate);
   const ctx = new OfflineAudioContext(2, length, sampleRate);
 
-  // Reverb impulse
   const revLen = Math.ceil(sampleRate * 1.6);
   const revBuf = ctx.createBuffer(2, revLen, sampleRate);
   for (let c = 0; c < 2; c++) {
@@ -62,7 +60,6 @@ async function renderBackingTrack(
   conv.connect(revWet); revWet.connect(ctx.destination);
   revDry.connect(ctx.destination);
 
-  // Distortion
   let dist: WaveShaperNode | null = null;
   if (genre.distortion && genre.distAmount > 0) {
     dist = ctx.createWaveShaper();
@@ -77,12 +74,10 @@ async function renderBackingTrack(
     if (dist) dist.connect(conv);
   }
 
-  // Schedule each note from the actual drawing melody
   let t = 0;
   const notes = melodyNotes.filter(n => !n.rest);
-  if (notes.length === 0) return ctx.startRendering(); // silence if no melody
+  if (notes.length === 0) return ctx.startRendering();
 
-  // Loop notes until we fill durationSec
   let ni = 0;
   while (t < durationSec + 0.1) {
     const note = notes[ni % notes.length];
@@ -115,7 +110,6 @@ async function renderBackingTrack(
       filt.connect(g); g.connect(revDry); g.connect(conv);
     }
     if (dist) {
-      // gain after dist
       const gd = ctx.createGain();
       gd.gain.setValueAtTime(0.001, t);
       gd.gain.linearRampToValueAtTime(vol, t + Math.min(0.02, dur * 0.1));
@@ -132,7 +126,6 @@ async function renderBackingTrack(
   return ctx.startRendering();
 }
 
-// ─── Encode AudioBuffer → WAV ───
 function audioBufferToWav(buffer: AudioBuffer): Blob {
   const numCh = buffer.numberOfChannels;
   const sr    = buffer.sampleRate;
@@ -154,7 +147,6 @@ function audioBufferToWav(buffer: AudioBuffer): Blob {
   return new Blob([ab],{type:"audio/wav"});
 }
 
-// ─── Mix mic + backing ───
 async function mixBuffers(mic: AudioBuffer, backing: AudioBuffer, sr: number): Promise<AudioBuffer> {
   const dur = Math.max(mic.duration, backing.duration);
   const off = new OfflineAudioContext(2, Math.ceil(dur*sr), sr);
@@ -175,7 +167,6 @@ function getSupportedMimeType(): string {
 interface Props { melody: MelodyNote[]; }
 
 export function ExperimentMode({ melody }: Props) {
-  const [petPhoto,      setPetPhoto]      = useState<string|null>(null);
   const [selectedGenre, setSelectedGenre] = useState<GenreDef>(GENRES[0]);
   const [recording,     setRecording]     = useState(false);
   const [mixing,        setMixing]        = useState(false);
@@ -196,14 +187,6 @@ export function ExperimentMode({ melody }: Props) {
   const melodyNotes = melody.filter(n => !n.rest);
   const hasDrawing  = melodyNotes.length > 0;
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => setPetPhoto(ev.target?.result as string);
-    reader.readAsDataURL(file);
-  };
-
-  // Live speaker preview while recording — uses actual melody notes shaped by genre
   function startLivePreview(genre: GenreDef) {
     try {
       const ctx = new AudioContext();
@@ -221,7 +204,6 @@ export function ExperimentMode({ melody }: Props) {
       let t = ctx.currentTime;
       const oscs: OscillatorNode[] = [];
       let ni = 0;
-      // schedule 60s worth
       while (t - ctx.currentTime < 62) {
         const note = notes[ni % notes.length]; ni++;
         const freq = semShift(note.freq, genre.pitchShift);
@@ -319,35 +301,15 @@ export function ExperimentMode({ melody }: Props) {
   return (
     <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:"#B8E04A", fontFamily:"'Chewy',cursive" }}>
 
-      {/* Pet photo */}
-      <div style={{ flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", paddingTop:12, gap:4 }}>
-        <label htmlFor="pet-upload-exp" style={{
-          width:86, height:86, borderRadius:"50%",
-          background: petPhoto ? "transparent" : "#8DC827",
-          border:"4px solid #1A1A1A", boxShadow:"4px 4px 0 #1A1A1A",
-          cursor:"pointer", overflow:"hidden",
-          display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:2,
-        }}>
-          {petPhoto
-            ? <img src={petPhoto} style={{ width:"100%",height:"100%",objectFit:"cover" }} />
-            : <><span style={{fontSize:"1.7rem"}}>📷</span><span style={{fontSize:"0.56rem",color:"#1A1A1A",textAlign:"center"}}>Upload pet</span></>
-          }
-        </label>
-        <input id="pet-upload-exp" type="file" accept="image/*" onChange={handlePhotoUpload} style={{display:"none"}} />
-        <div style={{fontSize:"0.7rem",color:"#1A1A1A",opacity:0.7}}>
-          {mixing ? "⏳ Mixing..." : recording ? `🔴 ${recSeconds}s` : "Your star 🌟"}
-        </div>
-      </div>
-
       {/* No drawing warning */}
       {!hasDrawing && (
-        <div style={{ margin:"8px 16px 0", background:"#FFE033", border:"2px solid #1A1A1A", borderRadius:10, padding:"7px 12px", fontSize:"0.75rem", color:"#1A1A1A", textAlign:"center", boxShadow:"2px 2px 0 #1A1A1A" }}>
+        <div style={{ margin:"12px 16px 0", background:"#FFE033", border:"2px solid #1A1A1A", borderRadius:10, padding:"7px 12px", fontSize:"0.75rem", color:"#1A1A1A", textAlign:"center", boxShadow:"2px 2px 0 #1A1A1A" }}>
           ⚠️ Go to <strong>Draw</strong> first — your drawing becomes the melody of your remix!
         </div>
       )}
 
       {/* Genre pills */}
-      <div style={{ flexShrink:0, padding:"10px 14px 0" }}>
+      <div style={{ flexShrink:0, padding:"12px 14px 0" }}>
         <div style={{ fontSize:"0.75rem", color:"#1A1A1A", marginBottom:6, textAlign:"center" }}>
           🎶 Your drawing remixed in this style:
         </div>
@@ -393,7 +355,7 @@ export function ExperimentMode({ melody }: Props) {
               : recording
               ? `🎵 Your drawing plays in ${selectedGenre.label} style! Tap Stop when done.`
               : hasDrawing
-              ? `Your drawing’s unique melody → remixed in ${selectedGenre.label} → mixed with your voice!`
+              ? `Your drawing's unique melody → remixed in ${selectedGenre.label} → mixed with your voice!`
               : "Draw something first, then come back to remix it!"
             }
           </div>
