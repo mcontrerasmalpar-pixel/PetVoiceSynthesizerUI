@@ -55,7 +55,7 @@ export default function App() {
   const TABS: { id: Screen; label: string; locked?: boolean }[] = [
     { id: "draw",       label: "🎨 Draw" },
     { id: "play",       label: "🎵 Listen" },
-    { id: "experiment", label: "🧪 Experiments" },
+    { id: "experiment", label: "🎛️ Remix" },
     { id: "profile",    label: "🐾 Profile", locked: !savedPet },
   ];
 
@@ -80,19 +80,21 @@ export default function App() {
         display: "flex", alignItems: "center", justifyContent: "space-between",
         gap: "8px", zIndex: 10,
       }}>
+        {/* Logo */}
         <div style={{ display:"flex", alignItems:"center", gap:"6px", flexShrink:0 }}>
           <div style={{
             width:"34px", height:"34px", borderRadius:"50%",
             background:"#FF8C42", border:"3px solid #1A1A1A",
             display:"flex", alignItems:"center", justifyContent:"center",
             fontSize:"1.1rem", boxShadow:"2px 2px 0 #1A1A1A",
-          }}>🐾</div>
+          }}>🎨</div>
           <div>
-            <div style={{ fontSize:"1rem", color:"#1A1A1A", fontFamily:"'Chewy'", lineHeight:1 }}>Pet Melody</div>
-            <div style={{ fontSize:"0.6rem", color:"#5A3A00", fontFamily:"'Chewy'" }}>Hi, {ownerName} 👋</div>
+            <div style={{ fontSize:"1rem", color:"#1A1A1A", fontFamily:"'Chewy'", lineHeight:1 }}>Doodio</div>
+            <div style={{ fontSize:"0.58rem", color:"#5A3A00", fontFamily:"'Chewy'", lineHeight:1 }}>Hi, {ownerName} 👋</div>
           </div>
         </div>
 
+        {/* Tabs */}
         <div style={{ display:"flex", gap:"5px", flexWrap:"wrap" }}>
           {TABS.map(t => (
             <button key={t.id} onClick={() => !t.locked && goTo(t.id)} style={{
@@ -102,13 +104,14 @@ export default function App() {
               color: t.locked ? "#AAA" : "#1A1A1A",
               cursor: t.locked ? "not-allowed" : "pointer",
               fontFamily:"'Chewy'", fontSize:"0.78rem",
-              boxShadow: screen===t.id ? "2px 2px 0 #1A1A1A" : "2px 2px 0 #1A1A1A",
+              boxShadow: "2px 2px 0 #1A1A1A",
               transform: screen===t.id ? "translate(1px,1px)" : "none",
               whiteSpace: "nowrap",
             }}>{t.label}{t.locked ? " 🔒" : ""}</button>
           ))}
         </div>
 
+        {/* Save button */}
         <button onClick={() => drawingDataUrl && setShowSaveModal(true)} style={{
           display:"flex", alignItems:"center", gap:"6px",
           background: savedPet ? "#B8E04A" : "#FFFBF2",
@@ -119,8 +122,8 @@ export default function App() {
         }}>
           {drawingDataUrl
             ? <img src={drawingDataUrl} style={{ width:"22px",height:"22px",borderRadius:"4px",border:"2px solid #1A1A1A",objectFit:"cover" }} />
-            : <span style={{ fontSize:"0.95rem" }}>🐱</span>}
-          <span style={{ fontSize:"0.8rem",color:"#1A1A1A" }}>
+            : <span style={{ fontSize:"0.95rem" }}>🎵</span>}
+          <span style={{ fontSize:"0.8rem", color:"#1A1A1A" }}>
             {savedPet ? `${savedPet.name} ✅` : "Save"}
           </span>
         </button>
@@ -157,12 +160,13 @@ export default function App() {
         )}
       </div>
 
+      {/* Footer steps */}
       <div style={{
         flexShrink:0, height:"28px",
         background:"#B8E04A", borderTop:"3px solid #1A1A1A",
         display:"flex", alignItems:"center", justifyContent:"center", gap:"10px",
       }}>
-        {["1 · Draw 🎨","→","2 · Listen 🎵","→","3 · Experiments 🧪","→","4 · Save 🐾"].map((t,i) => (
+        {["1 · Draw 🎨","→","2 · Listen 🎵","→","3 · Remix 🎛️","→","4 · Save 💾"].map((t,i) => (
           <span key={i} style={{ fontSize:"0.72rem",color:"#1A1A1A",fontFamily:"'Chewy'",opacity:i%2===1?0.4:1 }}>{t}</span>
         ))}
       </div>
