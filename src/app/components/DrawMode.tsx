@@ -19,11 +19,11 @@ const BRUSH_SIZES = [
 ];
 
 const STATUS_LABELS: Record<string, string> = {
-  idle:    "📷 Cámara apagada",
-  loading: "⏳ Iniciando...",
-  active:  "✋ ¡Mano detectada!",
-  no_hand: "👀 Buscando mano...",
-  error:   "❌ Sin permiso de cámara",
+  idle:    "📷 Camera off",
+  loading: "⏳ Starting...",
+  active:  "✋ Hand detected!",
+  no_hand: "👀 Looking for hand...",
+  error:   "❌ No camera permission",
 };
 
 interface DrawModeProps {
@@ -63,7 +63,12 @@ export function DrawMode({ onSaveDrawing, onGoToListen, hasDrawing }: DrawModePr
     const measure = () => {
       const el = wrapRef.current;
       if (!el) return;
-      setCanvasWH({ w: Math.max(el.clientWidth - 16, 100), h: Math.max(el.clientHeight - 16, 100) });
+      // Reserve ~60px for the bottom button bar
+      const maxH = Math.max(el.clientHeight - 60, 80);
+      const maxW = Math.max(el.clientWidth - 16, 80);
+      // Keep canvas square using the smaller dimension, capped at maxH
+      const side = Math.min(maxW, maxH);
+      setCanvasWH({ w: side, h: side });
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -98,7 +103,6 @@ export function DrawMode({ onSaveDrawing, onGoToListen, hasDrawing }: DrawModePr
     ctx.stroke();
   }, []);
 
-  // MediaPipe drawing
   useEffect(() => {
     if (!camEnabled || !fingerPos) { lastPosRef.current = null; return; }
     const c = canvasRef.current; if (!c) return;
@@ -122,7 +126,6 @@ export function DrawMode({ onSaveDrawing, onGoToListen, hasDrawing }: DrawModePr
     };
   }, []);
 
-  // Native touch listeners
   useEffect(() => {
     const c = canvasRef.current; if (!c) return;
     const onTS = (e: TouchEvent) => {
@@ -187,7 +190,7 @@ export function DrawMode({ onSaveDrawing, onGoToListen, hasDrawing }: DrawModePr
   return (
     <div style={{ flex: 1, display: "flex", overflow: "hidden", fontFamily: "'Chewy',cursive" }}>
 
-      {/* Left sidebar — colors + sizes */}
+      {/* Left sidebar */}
       <div style={{
         width: "64px", flexShrink: 0,
         background: "#FFE033", borderRight: "3px solid #1A1A1A",
@@ -218,19 +221,20 @@ export function DrawMode({ onSaveDrawing, onGoToListen, hasDrawing }: DrawModePr
         ))}
       </div>
 
-      {/* Canvas area — canvas + video overlay inside same relative container */}
+      {/* Canvas area */}
       <div ref={wrapRef} style={{
         flex: 1, display: "flex", flexDirection: "column",
         alignItems: "center", justifyContent: "center",
         background: "#5BC8F5", overflow: "hidden", padding: "8px",
-        gap: "6px",
+        gap: "8px",
       }}>
-        {/* Canvas wrapper — position:relative so video overlays inside */}
+        {/* Canvas wrapper */}
         <div style={{
           position: "relative",
           background: "#1A1A1A", borderRadius: "12px",
           padding: "4px", boxShadow: "6px 6px 0 #1A1A1A",
           lineHeight: 0,
+          flexShrink: 1,
         }}>
           <canvas
             ref={canvasRef}
@@ -240,6 +244,7 @@ export function DrawMode({ onSaveDrawing, onGoToListen, hasDrawing }: DrawModePr
               display: "block", borderRadius: "8px",
               cursor: camEnabled ? "none" : "crosshair",
               touchAction: "none", userSelect: "none",
+              maxWidth: "100%",
             }}
             onMouseDown={onMD}
             onMouseMove={onMM}
@@ -247,35 +252,23 @@ export function DrawMode({ onSaveDrawing, onGoToListen, hasDrawing }: DrawModePr
             onMouseLeave={onMU}
           />
 
-          {/* Camera overlay — bottom-right corner inside the canvas frame */}
           {camEnabled && (
             <div style={{
-              position: "absolute",
-              bottom: "10px",
-              right: "10px",
-              zIndex: 10,
-              borderRadius: "10px",
-              border: "3px solid #1A1A1A",
-              boxShadow: "3px 3px 0 #1A1A1A",
-              overflow: "hidden",
-              lineHeight: 0,
-              width: "160px",
-              background: "#000",
+              position: "absolute", bottom: "10px", right: "10px",
+              zIndex: 10, borderRadius: "10px",
+              border: "3px solid #1A1A1A", boxShadow: "3px 3px 0 #1A1A1A",
+              overflow: "hidden", lineHeight: 0, width: "160px", background: "#000",
             }}>
               <video
                 ref={videoRef}
-                width={160}
-                height={120}
+                width={160} height={120}
                 style={{ display: "block", transform: "scaleX(-1)", width: "160px", height: "120px", objectFit: "cover" }}
-                playsInline
-                muted
+                playsInline muted
               />
-              {/* Status badge inside cam preview */}
               <div style={{
                 position: "absolute", bottom: "4px", left: "4px",
                 background: status === "active" ? "#B8E04A" : status === "error" ? "#FF6B8A" : "#FFE033",
-                border: "2px solid #1A1A1A", borderRadius: "50px",
-                padding: "1px 8px",
+                border: "2px solid #1A1A1A", borderRadius: "50px", padding: "1px 8px",
               }}>
                 <span style={{ fontSize: "0.65rem", color: "#1A1A1A", fontFamily: "'Chewy'" }}>
                   {STATUS_LABELS[status]}
@@ -285,34 +278,32 @@ export function DrawMode({ onSaveDrawing, onGoToListen, hasDrawing }: DrawModePr
           )}
         </div>
 
-        {/* Bottom bar: status (when cam off) + Escuchar button */}
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+        {/* Bottom bar — always visible */}
+        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexShrink: 0, flexWrap: "wrap", justifyContent: "center" }}>
           {!camEnabled && (
             <div style={{
-              background: "#FFE033",
-              border: "3px solid #1A1A1A", borderRadius: "50px",
-              padding: "2px 12px", boxShadow: "3px 3px 0 #1A1A1A",
+              background: "#FFE033", border: "3px solid #1A1A1A",
+              borderRadius: "50px", padding: "4px 14px", boxShadow: "3px 3px 0 #1A1A1A",
             }}>
               <span style={{ fontSize: "0.78rem", color: "#1A1A1A", fontFamily: "'Chewy'" }}>
-                🖱️ Modo ratón
+                🖥️ Mouse mode
               </span>
             </div>
           )}
-
           {hasDrawing && (
             <button onClick={onGoToListen} style={{
-              padding: "4px 14px", borderRadius: "50px",
+              padding: "4px 16px", borderRadius: "50px",
               background: "#B8E04A", border: "3px solid #1A1A1A",
               cursor: "pointer", fontFamily: "'Chewy'", fontSize: "0.82rem",
-              color: "#1A1A1A", boxShadow: "3px 3px 0 #1A1A1A",
+              color: "#1A1A1A", boxShadow: "3px 3px 0 #1A1A1A", flexShrink: 0,
             }}>
-              🎵 ¡Escuchar!
+              🎵 Listen!
             </button>
           )}
         </div>
       </div>
 
-      {/* Right sidebar — color preview + reset + cam toggle */}
+      {/* Right sidebar */}
       <div style={{
         width: "72px", flexShrink: 0,
         background: "#B8E04A", borderLeft: "3px solid #1A1A1A",
