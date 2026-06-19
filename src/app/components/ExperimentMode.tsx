@@ -1,211 +1,169 @@
 import { useState, useRef, useEffect } from "react";
 import type { MelodyNote } from "./PlayMode";
 
-// ─── Audio Context ───────────────────────────────────────────────────────────
 let _expCtx: AudioContext | null = null;
 function getCtx() {
   if (!_expCtx) _expCtx = new AudioContext();
   return _expCtx;
 }
 
-// ─── Genre definitions ────────────────────────────────────────────────────────
-// scale: semitone intervals from root (C4 = 261.63 Hz)
-// filterHz: lowpass cutoff, reverbMix: 0-1, oscType: oscillator character
-const ROOT = 261.63; // C4
+const ROOT = 261.63;
 
-type OscType = OscillatorType;
 interface GenreDef {
   id: string;
   label: string;
   emoji: string;
-  color: string;         // row accent
-  scale: number[];       // semitones for 6 instrument columns
+  color: string;
+  textColor: string;
+  scale: number[];       // semitone intervals
+  oscType: OscillatorType;
   filterHz: number;
   reverbMix: number;
-  oscType: OscType;
-  tempoMult: number;     // duration multiplier (lower = faster)
+  tempoMult: number;
   distortion: boolean;
+  noteDur: number;       // seconds per note in backing track
+  notePause: number;     // gap between notes
 }
 
 const GENRES: GenreDef[] = [
-  {
-    id: "rock", label: "ROCK", emoji: "🎸",
-    color: "#FF4444",
-    scale: [0, 5, 7, 10, 12, 15],       // minor pentatonic
-    filterHz: 3500, reverbMix: 0.15, oscType: "sawtooth",
-    tempoMult: 0.85, distortion: true,
-  },
-  {
-    id: "jazz", label: "JAZZ", emoji: "🎷",
-    color: "#FFB830",
-    scale: [0, 3, 5, 7, 10, 14],        // dorian
-    filterHz: 2200, reverbMix: 0.35, oscType: "sine",
-    tempoMult: 1.1, distortion: false,
-  },
-  {
-    id: "metal", label: "METAL", emoji: "🤘",
-    color: "#888888",
-    scale: [0, 1, 5, 6, 7, 10],         // phrygian / diminished
-    filterHz: 5000, reverbMix: 0.08, oscType: "sawtooth",
-    tempoMult: 0.6, distortion: true,
-  },
-  {
-    id: "pop", label: "POP", emoji: "🎤",
-    color: "#FF6BE8",
-    scale: [0, 4, 7, 9, 12, 16],        // major
-    filterHz: 4000, reverbMix: 0.25, oscType: "triangle",
-    tempoMult: 1.0, distortion: false,
-  },
-  {
-    id: "funk", label: "FUNK", emoji: "🎺",
-    color: "#B8E04A",
-    scale: [0, 3, 5, 7, 10, 12],        // mixolydian
-    filterHz: 1800, reverbMix: 0.2, oscType: "square",
-    tempoMult: 0.75, distortion: false,
-  },
-  {
-    id: "ballad", label: "BALLAD", emoji: "🎻",
-    color: "#5BC8F5",
-    scale: [0, 4, 7, 11, 14, 17],       // major 7th / lush
-    filterHz: 1400, reverbMix: 0.55, oscType: "sine",
-    tempoMult: 1.5, distortion: false,
-  },
+  { id:"rock",   label:"Rock",   emoji:"🎸", color:"#FF4444", textColor:"#FFF",
+    scale:[0,5,7,10,12,15], oscType:"sawtooth", filterHz:3500, reverbMix:0.15,
+    tempoMult:0.85, distortion:true,  noteDur:0.22, notePause:0.06 },
+  { id:"jazz",   label:"Jazz",   emoji:"🎷", color:"#FF8C42", textColor:"#FFF",
+    scale:[0,3,5,7,10,14], oscType:"sine",     filterHz:2200, reverbMix:0.38,
+    tempoMult:1.1,  distortion:false, noteDur:0.38, notePause:0.12 },
+  { id:"metal",  label:"Metal",  emoji:"🤘", color:"#888",   textColor:"#FFF",
+    scale:[0,1,5,6,7,10],  oscType:"sawtooth", filterHz:5000, reverbMix:0.08,
+    tempoMult:0.6,  distortion:true,  noteDur:0.14, notePause:0.04 },
+  { id:"pop",    label:"Pop",    emoji:"🎤", color:"#FF6BE8", textColor:"#FFF",
+    scale:[0,4,7,9,12,16], oscType:"triangle", filterHz:4000, reverbMix:0.25,
+    tempoMult:1.0,  distortion:false, noteDur:0.28, notePause:0.08 },
+  { id:"funk",   label:"Funk",   emoji:"🎺", color:"#1A1A2E", textColor:"#FFE033",
+    scale:[0,3,5,7,10,12], oscType:"square",   filterHz:1800, reverbMix:0.20,
+    tempoMult:0.75, distortion:false, noteDur:0.18, notePause:0.10 },
+  { id:"ballad", label:"Ballad", emoji:"🎻", color:"#5BC8F5", textColor:"#1A1A1A",
+    scale:[0,4,7,11,14,17],oscType:"sine",     filterHz:1400, reverbMix:0.55,
+    tempoMult:1.5,  distortion:false, noteDur:0.55, notePause:0.18 },
 ];
 
-// ─── Instrument columns ───────────────────────────────────────────────────────
-interface InstrumentCol {
-  id: string;
-  label: string;
-  emoji: string;
-  octaveShift: number; // semitone offset on top of genre scale note
-  volMult: number;
-  durMult: number;
-}
-const INSTRUMENTS: InstrumentCol[] = [
-  { id: "drums",   label: "DRUMS",  emoji: "🥁", octaveShift: -12, volMult: 1.2, durMult: 0.4 },
-  { id: "bass",    label: "BASS",   emoji: "🎵", octaveShift: -5,  volMult: 1.0, durMult: 0.9 },
-  { id: "melody",  label: "MEL",    emoji: "🎹", octaveShift: 0,   volMult: 0.9, durMult: 1.0 },
-  { id: "harmony", label: "HARM",   emoji: "🪗", octaveShift: 4,   volMult: 0.7, durMult: 1.2 },
-  { id: "synth",   label: "SYNTH",  emoji: "🌟", octaveShift: 7,   volMult: 0.6, durMult: 1.4 },
-  { id: "fx",      label: "FX",     emoji: "✨", octaveShift: 12,  volMult: 0.5, durMult: 0.6 },
-];
-
-// ─── Audio synthesis ──────────────────────────────────────────────────────────
-function semitoneToHz(semitones: number): number {
-  return ROOT * Math.pow(2, semitones / 12);
+function semHz(semi: number, root: number) {
+  return root * Math.pow(2, semi / 12);
 }
 
-// Simple convolver-based reverb approximation using noise impulse
-function createReverb(ctx: AudioContext, mix: number): { input: GainNode; output: GainNode } {
+function createReverb(ctx: AudioContext, mix: number) {
   const input = ctx.createGain();
   const output = ctx.createGain();
   const dry = ctx.createGain(); dry.gain.value = 1 - mix;
   const wet = ctx.createGain(); wet.gain.value = mix;
-
-  const len = ctx.sampleRate * 1.5;
+  const len = ctx.sampleRate * 1.8;
   const buf = ctx.createBuffer(2, len, ctx.sampleRate);
   for (let c = 0; c < 2; c++) {
     const d = buf.getChannelData(c);
-    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
+    for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, 2.5);
   }
   const conv = ctx.createConvolver(); conv.buffer = buf;
-
   input.connect(dry); dry.connect(output);
   input.connect(conv); conv.connect(wet); wet.connect(output);
   return { input, output };
 }
 
-function playGenreInstrument(
-  genre: GenreDef,
-  colIndex: number,
-  baseFreqFromMelody: number,
-) {
-  const ctx = getCtx();
-  if (ctx.state === "suspended") ctx.resume();
-
-  const inst = INSTRUMENTS[colIndex];
-  const scaleSemitone = genre.scale[colIndex] + inst.octaveShift;
-  // blend genre scale with melody freq: use melody as root octave reference
-  const melodyRoot = baseFreqFromMelody > 0
-    ? baseFreqFromMelody * Math.pow(2, Math.round(Math.log2(ROOT / baseFreqFromMelody)))
-    : ROOT;
-  const freq = melodyRoot * Math.pow(2, scaleSemitone / 12);
-
-  const dur = 0.5 * genre.tempoMult * inst.durMult;
-  const vol = 0.7 * inst.volMult;
-  const now = ctx.currentTime;
-
-  const osc = ctx.createOscillator();
-  osc.type = genre.oscType;
-  osc.frequency.value = Math.max(40, Math.min(freq, 4000));
-
-  const gainNode = ctx.createGain();
-  gainNode.gain.setValueAtTime(0.001, now);
-  gainNode.gain.linearRampToValueAtTime(vol, now + 0.01);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, now + dur);
-
-  const filter = ctx.createBiquadFilter();
-  filter.type = "lowpass";
-  filter.frequency.value = genre.filterHz;
-
-  osc.connect(filter);
-
-  if (genre.distortion && (genre.id === "rock" || genre.id === "metal")) {
-    const wave = ctx.createWaveShaper();
-    const k = genre.id === "metal" ? 400 : 150;
-    const curve = new Float32Array(256);
-    for (let i = 0; i < 256; i++) {
-      const x = (i * 2) / 256 - 1;
-      curve[i] = ((Math.PI + k) * x) / (Math.PI + k * Math.abs(x));
-    }
-    wave.curve = curve;
-    filter.connect(wave);
-
-    const rev = createReverb(ctx, genre.reverbMix);
-    wave.connect(gainNode);
-    gainNode.connect(rev.input);
-    rev.output.connect(ctx.destination);
-  } else {
-    const rev = createReverb(ctx, genre.reverbMix);
-    filter.connect(gainNode);
-    gainNode.connect(rev.input);
-    rev.output.connect(ctx.destination);
+function makeDistortion(ctx: AudioContext, amount: number) {
+  const ws = ctx.createWaveShaper();
+  const curve = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const x = (i*2)/256 - 1;
+    curve[i] = ((Math.PI + amount)*x)/(Math.PI + amount*Math.abs(x));
   }
-
-  osc.start(now);
-  osc.stop(now + dur + 0.1);
+  ws.curve = curve;
+  return ws;
 }
 
-// ─── MIME type detection ──────────────────────────────────────────────────────
+// Schedule a full backing track for `durationSec` seconds using genre settings
+// Returns an array of oscillators/nodes so we can stop them early if needed
+function scheduleBackingTrack(
+  ctx: AudioContext,
+  genre: GenreDef,
+  melodyRoot: number,
+  durationSec: number,
+): OscillatorNode[] {
+  const oscillators: OscillatorNode[] = [];
+  const rev = createReverb(ctx, genre.reverbMix);
+  rev.output.connect(ctx.destination);
+
+  const stepSec = genre.noteDur + genre.notePause;
+  const totalSteps = Math.ceil(durationSec / stepSec);
+  const scaleLen = genre.scale.length;
+  const now = ctx.currentTime;
+
+  for (let i = 0; i < totalSteps; i++) {
+    const t = now + i * stepSec;
+    if (t - now > durationSec + 0.1) break;
+
+    // play 1-2 simultaneous notes (root + harmony)
+    const voices = [0, 2]; // scale degree indices
+    voices.forEach(vi => {
+      const semi = genre.scale[(i + vi) % scaleLen];
+      const freq = semHz(semi, melodyRoot);
+      if (freq < 40 || freq > 5000) return;
+
+      const osc = ctx.createOscillator();
+      osc.type = genre.oscType;
+      osc.frequency.value = freq;
+
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.001, t);
+      g.gain.linearRampToValueAtTime(vi === 0 ? 0.35 : 0.18, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, t + genre.noteDur);
+
+      const filt = ctx.createBiquadFilter();
+      filt.type = "lowpass";
+      filt.frequency.value = genre.filterHz;
+
+      osc.connect(filt);
+      if (genre.distortion) {
+        const dist = makeDistortion(ctx, genre.id === "metal" ? 400 : 150);
+        filt.connect(dist); dist.connect(g);
+      } else {
+        filt.connect(g);
+      }
+      g.connect(rev.input);
+
+      osc.start(t);
+      osc.stop(t + genre.noteDur + 0.05);
+      oscillators.push(osc);
+    });
+  }
+  return oscillators;
+}
+
 function getSupportedMimeType(): string {
-  const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg", "audio/mp4", ""];
+  const types = ["audio/webm;codecs=opus","audio/webm","audio/ogg;codecs=opus","audio/ogg","audio/mp4",""];
   for (const t of types) {
     if (t === "" || (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(t))) return t;
   }
   return "";
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
 interface Props { melody: MelodyNote[]; }
 
 export function ExperimentMode({ melody }: Props) {
   const [petPhoto,    setPetPhoto]    = useState<string | null>(null);
+  const [selectedGenre, setSelectedGenre] = useState<GenreDef>(GENRES[0]);
   const [recording,   setRecording]   = useState(false);
   const [recorded,    setRecorded]    = useState(false);
   const [remixURL,    setRemixURL]    = useState<string | null>(null);
   const [remixExt,    setRemixExt]    = useState("webm");
   const [recSeconds,  setRecSeconds]  = useState(0);
-  const [noteStep,    setNoteStep]    = useState(0);
-  // flash: "genreId-colIndex"
-  const [flash,       setFlash]       = useState<string | null>(null);
 
-  const mediaRecRef = useRef<MediaRecorder | null>(null);
-  const chunksRef   = useRef<BlobPart[]>([]);
-  const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const streamRef   = useRef<MediaStream | null>(null);
+  const mediaRecRef  = useRef<MediaRecorder | null>(null);
+  const chunksRef    = useRef<BlobPart[]>([]);
+  const timerRef     = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamRef    = useRef<MediaStream | null>(null);
+  const oscNodesRef  = useRef<OscillatorNode[]>([]);
+  const recStartRef  = useRef<number>(0);
 
-  const notes = melody.filter(n => !n.rest);
-  const baseFreq = notes.length > 0 ? notes[noteStep % notes.length].freq : ROOT;
+  const melodyNotes  = melody.filter(n => !n.rest);
+  const melodyRoot   = melodyNotes.length > 0 ? melodyNotes[0].freq : ROOT;
 
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -219,8 +177,10 @@ export function ExperimentMode({ melody }: Props) {
     try {
       const ctx = getCtx();
       if (ctx.state === "suspended") await ctx.resume();
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+
       const mimeType = getSupportedMimeType();
       const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
@@ -235,162 +195,153 @@ export function ExperimentMode({ melody }: Props) {
       };
       mr.start(100);
       mediaRecRef.current = mr;
-      setRecording(true); setRecorded(false); setRemixURL(null);
-      setNoteStep(0); setRecSeconds(0);
+      recStartRef.current = Date.now();
+
+      // Start backing track immediately — we don't know duration yet,
+      // schedule a generous 60s and we'll stop nodes on stopRecording
+      oscNodesRef.current = scheduleBackingTrack(ctx, selectedGenre, melodyRoot, 60);
+
+      setRecording(true); setRecorded(false); setRemixURL(null); setRecSeconds(0);
       timerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
     } catch { alert("Microphone access denied."); }
   };
 
   const stopRecording = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+
+    // Stop all scheduled backing track nodes immediately
+    oscNodesRef.current.forEach(o => { try { o.stop(); } catch {} });
+    oscNodesRef.current = [];
+
     if (mediaRecRef.current?.state !== "inactive") mediaRecRef.current?.stop();
     setRecording(false); setRecorded(true);
-  };
-
-  const tapButton = (genre: GenreDef, colIndex: number) => {
-    const canTap = recording || recorded;
-    if (!canTap) return;
-    playGenreInstrument(genre, colIndex, baseFreq);
-    setNoteStep(s => (s + 1) % Math.max(notes.length, 1));
-    const key = `${genre.id}-${colIndex}`;
-    setFlash(key);
-    setTimeout(() => setFlash(null), 160);
   };
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
     streamRef.current?.getTracks().forEach(t => t.stop());
+    oscNodesRef.current.forEach(o => { try { o.stop(); } catch {} });
   }, []);
 
-  const canTap = recording || recorded;
-
   return (
-    <div style={{ flex:1, display:"flex", flexDirection:"column", overflow:"hidden", background:"#1A1A2E", fontFamily:"'Chewy',cursive" }}>
+    <div style={{
+      flex:1, display:"flex", flexDirection:"column", overflow:"hidden",
+      background:"#B8E04A",   // ← Tomodachi green!
+      fontFamily:"'Chewy',cursive",
+    }}>
 
-      {/* Header + photo */}
-      <div style={{ flexShrink:0, padding:"8px 14px 6px", display:"flex", alignItems:"center", gap:"12px" }}>
-        <div style={{ color:"#FFE033", fontSize:"1rem" }}>🧪 Experiments</div>
-        {/* Pet photo pill */}
-        <label htmlFor="pet-upload-grid" style={{
-          width:44, height:44, borderRadius:"50%",
-          background: petPhoto ? "transparent" : "#2A2A4A",
-          border:"3px solid #FFE033",
-          boxShadow:"0 0 0 2px #1A1A1A",
-          cursor:"pointer", overflow:"hidden", flexShrink:0,
+      {/* Pet photo — top center */}
+      <div style={{ flexShrink:0, display:"flex", flexDirection:"column", alignItems:"center", paddingTop:14, gap:6 }}>
+        <label htmlFor="pet-upload-exp" style={{
+          width:100, height:100, borderRadius:"50%",
+          background: petPhoto ? "transparent" : "#8DC827",
+          border:"4px solid #1A1A1A",
+          boxShadow:"4px 4px 0 #1A1A1A",
+          cursor:"pointer", overflow:"hidden",
           display:"flex", alignItems:"center", justifyContent:"center",
+          flexDirection:"column", gap:2,
         }}>
           {petPhoto
             ? <img src={petPhoto} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
-            : <span style={{ fontSize:"1.3rem" }}>📷</span>
+            : (<>
+                <span style={{ fontSize:"2rem" }}>📷</span>
+                <span style={{ fontSize:"0.6rem", color:"#1A1A1A", textAlign:"center", lineHeight:1.2 }}>Upload pet</span>
+              </>)
           }
         </label>
-        <input id="pet-upload-grid" type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display:"none" }} />
-        <div style={{ fontSize:"0.7rem", color:"rgba(255,255,255,0.4)", lineHeight:1.3 }}>
-          {petPhoto ? "Tap to change photo" : "Upload your pet →"}<br/>
-          {!canTap && "Record first, then tap!"}
-          {recording && `🔴 ${recSeconds}s`}
-          {recorded && !recording && "✅ Tap buttons to mix!"}
+        <input id="pet-upload-exp" type="file" accept="image/*" onChange={handlePhotoUpload} style={{ display:"none" }} />
+        <div style={{ fontSize:"0.75rem", color:"#1A1A1A", opacity:0.7 }}>
+          {recording ? `🔴 Recording... ${recSeconds}s` : recorded ? "✅ Done!" : "Your pet’s star 🌟"}
         </div>
       </div>
 
-      {/* Column headers */}
-      <div style={{ flexShrink:0, display:"flex", paddingLeft:70, paddingRight:8, gap:3 }}>
-        {INSTRUMENTS.map(inst => (
-          <div key={inst.id} style={{
-            flex:1, textAlign:"center",
-            fontSize:"0.55rem", color:"rgba(255,255,255,0.5)",
-            lineHeight:1.2, paddingBottom:2,
-          }}>
-            <div style={{ fontSize:"0.85rem" }}>{inst.emoji}</div>
-            {inst.label}
-          </div>
-        ))}
+      {/* Genre pills */}
+      <div style={{ flexShrink:0, padding:"14px 16px 0" }}>
+        <div style={{ fontSize:"0.8rem", color:"#1A1A1A", marginBottom:8, textAlign:"center" }}>
+          🎶 Choose a style — it plays while you record!
+        </div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:8, justifyContent:"center" }}>
+          {GENRES.map(g => {
+            const active = selectedGenre.id === g.id;
+            return (
+              <button
+                key={g.id}
+                onPointerDown={e => { e.preventDefault(); if (!recording) setSelectedGenre(g); }}
+                style={{
+                  padding:"8px 16px",
+                  borderRadius:"50px",
+                  background: active ? g.color : "#FFFBF2",
+                  border: active ? `3px solid #1A1A1A` : "3px solid #1A1A1A",
+                  color: active ? g.textColor : "#1A1A1A",
+                  fontFamily:"'Chewy',cursive", fontSize:"0.95rem",
+                  boxShadow: active ? "3px 3px 0 #1A1A1A" : "2px 2px 0 #1A1A1A",
+                  transform: active ? "translate(1px,1px)" : "none",
+                  cursor: recording ? "default" : "pointer",
+                  opacity: recording && !active ? 0.5 : 1,
+                  display:"flex", alignItems:"center", gap:5,
+                  WebkitTapHighlightColor:"transparent",
+                  touchAction:"manipulation",
+                  transition:"transform 0.08s, box-shadow 0.08s",
+                }}>
+                <span>{g.emoji}</span>
+                <span>{g.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Genre × Instrument grid */}
-      <div style={{ flex:1, overflow:"auto", padding:"4px 8px 4px 8px", display:"flex", flexDirection:"column", gap:5 }}>
-        {GENRES.map(genre => (
-          <div key={genre.id} style={{ display:"flex", alignItems:"center", gap:3 }}>
-
-            {/* Genre label */}
-            <div style={{
-              width:62, flexShrink:0,
-              background:"#0D0D1E",
-              border:`2px solid ${genre.color}`,
-              borderRadius:8,
-              padding:"4px 6px",
-              display:"flex", flexDirection:"column", alignItems:"center",
-              gap:1,
-            }}>
-              <span style={{ fontSize:"1.1rem", lineHeight:1 }}>{genre.emoji}</span>
-              <span style={{ fontSize:"0.58rem", color:genre.color, letterSpacing:"0.05em", fontWeight:"bold" }}>{genre.label}</span>
-            </div>
-
-            {/* 6 instrument buttons */}
-            {INSTRUMENTS.map((inst, colIdx) => {
-              const key = `${genre.id}-${colIdx}`;
-              const isFlash = flash === key;
-              return (
-                <button
-                  key={inst.id}
-                  onPointerDown={e => { e.preventDefault(); tapButton(genre, colIdx); }}
-                  style={{
-                    flex:1,
-                    aspectRatio:"1",
-                    borderRadius:8,
-                    background: isFlash ? "#FFFFFF" : canTap ? genre.color + "33" : "#1E1E38",
-                    border: isFlash ? `2px solid #FFFFFF` : `2px solid ${canTap ? genre.color : "#333"}`,
-                    boxShadow: isFlash ? `0 0 14px 4px ${genre.color}` : "none",
-                    cursor: canTap ? "pointer" : "default",
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                    padding:0,
-                    transform: isFlash ? "scale(1.18)" : "scale(1)",
-                    transition:"transform 0.08s, background 0.08s, box-shadow 0.08s",
-                    opacity: canTap ? 1 : 0.35,
-                    WebkitTapHighlightColor:"transparent",
-                    touchAction:"manipulation",
-                    minHeight:0,
-                    minWidth:0,
-                  }}>
-                  {/* LED dot */}
-                  <div style={{
-                    width: isFlash ? 12 : 8,
-                    height: isFlash ? 12 : 8,
-                    borderRadius:"50%",
-                    background: isFlash ? "#FFFFFF" : canTap ? genre.color : "#333",
-                    boxShadow: isFlash ? `0 0 8px ${genre.color}` : "none",
-                    transition:"all 0.08s",
-                  }} />
-                </button>
-              );
-            })}
+      {/* Info card */}
+      <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", padding:"0 20px" }}>
+        <div style={{
+          background:"#FFFBF2", border:"3px solid #1A1A1A",
+          borderRadius:16, padding:"14px 20px",
+          boxShadow:"4px 4px 0 #1A1A1A",
+          textAlign:"center", maxWidth:320,
+        }}>
+          <div style={{ fontSize:"2rem", marginBottom:4 }}>{selectedGenre.emoji}</div>
+          <div style={{ fontSize:"1.1rem", color:"#1A1A1A", marginBottom:4 }}>{selectedGenre.label}</div>
+          <div style={{ fontSize:"0.75rem", color:"#555", lineHeight:1.5 }}>
+            {recording
+              ? `🔺 Playing ${selectedGenre.label} backing track... tap Stop when done!`
+              : `Press Record — your pet’s voice will mix with a live ${selectedGenre.label} soundtrack!`
+            }
           </div>
-        ))}
+        </div>
       </div>
 
       {/* Bottom controls */}
-      <div style={{ flexShrink:0, padding:"8px 14px 12px", display:"flex", flexDirection:"column", gap:7, background:"#12122A", borderTop:"3px solid #FFE033" }}>
+      <div style={{
+        flexShrink:0, padding:"10px 16px 14px",
+        display:"flex", flexDirection:"column", gap:8,
+        background:"#8DC827", borderTop:"3px solid #1A1A1A",
+      }}>
         <button
           onPointerDown={e => { e.preventDefault(); recording ? stopRecording() : startRecording(); }}
           style={{
-            width:"100%", padding:"11px", borderRadius:"50px",
+            width:"100%", padding:"13px", borderRadius:"50px",
             background: recording ? "#FF6B8A" : "#FFE033",
             border: recording ? "3px solid #FF0040" : "3px solid #1A1A1A",
-            cursor:"pointer", fontFamily:"'Chewy',cursive", fontSize:"1rem", color:"#1A1A1A",
-            boxShadow: recording ? "0 0 14px #FF6B8A88" : "4px 4px 0 #000",
-            display:"flex", alignItems:"center", justifyContent:"center", gap:"8px",
+            cursor:"pointer", fontFamily:"'Chewy',cursive", fontSize:"1.05rem", color:"#1A1A1A",
+            boxShadow: recording ? "0 0 16px #FF6B8A88" : "4px 4px 0 #1A1A1A",
+            display:"flex", alignItems:"center", justifyContent:"center", gap:8,
             WebkitTapHighlightColor:"transparent", touchAction:"manipulation",
           }}>
           <span>{recording ? "⏹" : "🔴"}</span>
-          <span>{recording ? `Stop recording (${recSeconds}s)` : "Record your pet"}</span>
+          <span>{recording ? `Stop (${recSeconds}s)` : `Record with ${selectedGenre.label}!`}</span>
         </button>
 
         {remixURL && (
-          <div style={{ background:"#B8E04A", border:"2px solid #1A1A1A", borderRadius:"12px", padding:"7px 10px", display:"flex", alignItems:"center", gap:"8px" }}>
-            <audio controls src={remixURL} style={{ flex:1, height:"30px" }} />
+          <div style={{
+            background:"#FFFBF2", border:"3px solid #1A1A1A",
+            borderRadius:14, padding:"8px 12px",
+            display:"flex", alignItems:"center", gap:8,
+            boxShadow:"3px 3px 0 #1A1A1A",
+          }}>
+            <audio controls src={remixURL} style={{ flex:1, height:"32px" }} />
             <a
-              href={remixURL} download={`pet-experiment.${remixExt}`}
-              style={{ display:"flex", alignItems:"center", gap:4, padding:"5px 10px", borderRadius:"50px", background:"#FFFBF2", border:"2px solid #1A1A1A", fontFamily:"'Chewy',cursive", fontSize:"0.8rem", color:"#1A1A1A", boxShadow:"2px 2px 0 #1A1A1A", textDecoration:"none", flexShrink:0 }}>
+              href={remixURL} download={`pet-${selectedGenre.id}.${remixExt}`}
+              style={{ display:"flex", alignItems:"center", gap:4, padding:"6px 12px", borderRadius:"50px", background:"#B8E04A", border:"2px solid #1A1A1A", fontFamily:"'Chewy',cursive", fontSize:"0.85rem", color:"#1A1A1A", boxShadow:"2px 2px 0 #1A1A1A", textDecoration:"none", flexShrink:0 }}>
               ⬇️ Save
             </a>
           </div>
