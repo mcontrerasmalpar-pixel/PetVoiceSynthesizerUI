@@ -56,11 +56,11 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
       {/* Floating bg elements */}
       {[
         { e: "🎵", top: "8%",  left: "8%",  size: "2rem",   rot: "15deg",  op: 0.5 },
-        { e: "🐾", top: "12%", left: "82%", size: "1.8rem", rot: "-12deg", op: 0.45 },
+        { e: "🎨", top: "12%", left: "82%", size: "1.8rem", rot: "-12deg", op: 0.45 },
         { e: "✶",  top: "6%",  left: "50%", size: "1.5rem", rot: "20deg",  op: 0.4 },
-        { e: "🎵", top: "78%", left: "85%", size: "1.6rem", rot: "-15deg", op: 0.4 },
+        { e: "🎶", top: "78%", left: "85%", size: "1.6rem", rot: "-15deg", op: 0.4 },
         { e: "⭐", top: "82%", left: "10%", size: "1.4rem", rot: "8deg",   op: 0.45 },
-        { e: "🐾", top: "65%", left: "4%",  size: "1.2rem", rot: "12deg",  op: 0.35 },
+        { e: "✏️", top: "65%", left: "4%",  size: "1.2rem", rot: "12deg",  op: 0.35 },
         { e: "🎶", top: "25%", left: "90%", size: "1.4rem", rot: "-8deg",  op: 0.4 },
         { e: "✶",  top: "70%", left: "92%", size: "1rem",   rot: "25deg",  op: 0.35 },
       ].map((d, i) => (
@@ -93,14 +93,14 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           background: "#FF8C42", border: "4px solid #1A1A1A",
           display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: "2rem", boxShadow: "3px 3px 0 #1A1A1A", marginBottom: "4px",
-        }}>🐾</div>
+        }}>🎨</div>
 
         <div style={{ textAlign: "center" }}>
-          <h1 style={{ margin: 0, fontSize: "1.6rem", color: "#1A1A1A", fontFamily: "'Chewy', cursive", letterSpacing: "0.5px" }}>
-            Pet Voice Synthesizer
+          <h1 style={{ margin: 0, fontSize: "1.9rem", color: "#1A1A1A", fontFamily: "'Chewy', cursive", letterSpacing: "1px" }}>
+            Doodio
           </h1>
-          <p style={{ margin: "4px 0 0", fontSize: "0.9rem", color: "#5A3A00", fontFamily: "'Chewy', cursive" }}>
-            {isRegister ? "¡Crea tu cuenta! 🌟" : "hola de nuevo 👋"}
+          <p style={{ margin: "4px 0 0", fontSize: "0.85rem", color: "#5A3A00", fontFamily: "'Chewy', cursive" }}>
+            {isRegister ? "¡Crea tu cuenta! 🌟" : "Doodle it. Hear it. 👋"}
           </p>
         </div>
 
@@ -127,7 +127,6 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           />
         </div>
 
-        {/* Error */}
         {error && (
           <div style={{
             width: "100%", padding: "8px 12px",
@@ -152,7 +151,7 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
           onMouseDown={e => { if (!loading) { e.currentTarget.style.transform = "translate(2px,2px)"; e.currentTarget.style.boxShadow = "2px 2px 0 #1A1A1A"; }}}
           onMouseUp={e => { e.currentTarget.style.transform = ""; e.currentTarget.style.boxShadow = loading ? "none" : "4px 4px 0 #1A1A1A"; }}
         >
-          {loading ? "⏳ Cargando..." : isRegister ? "¡Crear cuenta! 🎉" : "¡Entrar! 🐾"}
+          {loading ? "⏳ Cargando..." : isRegister ? "¡Crear cuenta! 🎉" : "¡Entrar! 🎨"}
         </button>
 
         <button
