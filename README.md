@@ -1,8 +1,20 @@
-# 🐾 Pet Voice Synthesizer UI
+# 🎨 Doodio
 
-> Draw your pet. Record its real sound. Play with it.
+> Draw anything. Hear it as music. No skills required.
 
-Original Figma design: [Pet Voice Synthesizer UI](https://www.figma.com/design/QAWzxncfn3KVK3o3wkuNBp/Pet-Voice-Synthesizer-UI)
+Live app: [doodio.vercel.app](https://doodio.vercel.app)
+
+Built for the **Figma Make Challenge** — prototyped with Figma Make, connected to GitHub via Figma MCP.
+
+---
+
+## 🌟 The idea
+
+I've always believed everyone can be creative. I'm not the best at drawing or playing instruments — but when I listen to music or make something with my hands, I feel a different version of myself. Freer.
+
+Doodio turns that feeling into an app. You draw anything — a chaotic scribble, a wobbly sun, a blob that sort of looks like a cat — and your drawing becomes a unique melody. Your colors, your strokes, your shapes become sound. No music theory. No artistic skills required.
+
+My demo drawings looked like a 5-year-old made them. They sounded beautiful. 🎵
 
 ---
 
@@ -17,10 +29,10 @@ npm run dev    # start dev server
 
 ## ✨ Features
 
-### 🎨 Draw Mode — Draw your pet
-Free-drawing canvas with color picker, brush size, and eraser. Visual style inspired by **Tomodachi Life** (Nintendo DS): bold colors, thick black outlines, `Chewy` typography. Your drawing is the foundation of everything that comes next.
+### 🎨 Draw — Your canvas, your rules
+Free-drawing canvas with color picker, brush size, and eraser. Visual style inspired by **Tomodachi Life** (Nintendo DS): bold colors, thick black outlines, `Chewy` typography. Draw anything — the messier the better.
 
-### 🔊 Sound Profile — Your drawing becomes a sound blueprint
+### 🔊 Sound Profile — Your drawing becomes music
 The drawing is analyzed pixel by pixel to extract a unique **Sound Profile**:
 
 | Drawing signal | What it controls |
@@ -30,52 +42,27 @@ The drawing is analyzed pixel by pixel to extract a unique **Sound Profile**:
 | **Ink coverage** | Note duration and volume |
 | **Vertical stroke position** | Pitch height within the scale |
 
-This profile is shown to the user — you can *see* why your pet sounds the way it does. Each drawing produces a melody that only it could generate.
+Every drawing produces a melody that only it could generate.
 
-### 🎵 Play Mode — Your drawing plays a melody
-The Sound Profile drives a full melody you can explore:
+### 🎵 Listen — Play and remix your melody
+Explore the melody your drawing created:
 - Choose from 6 instruments: Piano, Guitar, Marimba, Flute, Bells, Synth
+- Remix across 6 genres: Jazz, Rock, Ballad, Pop, Funk, Metal
 - Adjust tempo and activate loop
 - See the detected scale by name (e.g. *"D minor pentatonic"*)
 
-### 🎙️ Voice Mode — Record your real pet, remix it
-This is where the magic gets personal. Instead of synthetic animal sounds, **you record your actual cat, dog, or any pet** making a noise — a meow, a bark, a chirp — and then:
+### 🎤 Voice — Add yourself to the music
+Record your voice — sing, hum, or say anything — and layer it over your drawing's melody. Your voice becomes an instrument or a musical style. Something completely yours.
 
-1. **Record** your pet's sound live (microphone)
-2. **Layer it** over the melody generated from your drawing
-3. **Play with the instruments** from your Sound Profile — your pet's real voice becomes the lead
-4. **Loop and remix** — pitch shift, tempo, reverb built from your drawing's data
-
-Your pet's actual voice + your drawing's musical identity = something completely unique.
-
-### 😄 Mood Detection — Your drawing has feelings
-The Sound Profile also detects your pet's emotional state from the drawing:
-
-| Mood | Drawing signals |
-|---|---|
-| ⚡ Energetic | High frequency, high volume, smooth waveform |
-| 😊 Happy | High pitch, brightness, low roughness |
-| 🌊 Calm | Long duration, low volume, smooth waveform |
-| 💤 Sleepy | Very long duration, very low volume |
-| 🎉 Playful | Short duration, medium energy |
-| 🔮 Curious | High vibrato, medium frequency |
-| 🌧️ Melancholic | Low volume, rough waveform |
-| 🔥 Angry | Hard waveform, high volume, short duration |
-
-The mood is shown with context — *"Bold colors and dense strokes — this pet has things to say."* — so users understand exactly how the image became the emotion.
-
-### 💾 Save your pet
-Save your pet with a name and animal type to **Supabase**. The drawing is uploaded to **Supabase Storage** and the Sound Profile is saved as JSON. Everything accessible from your profile.
-
-### 🐾 Pet Profile
-View your saved pet: name, drawing, animal type, Sound Profile, and replay its melody anytime.
+### 💾 Gallery — Every doodle sounds different
+Save your doodle with a name to **Supabase**. Browse the shared gallery and tap any card to hear what that drawing sounds like. A collection of imperfect, beautiful things.
 
 ---
 
 ## 🗺️ App flow
 
 ```
-Draw 🎨 → Sound Profile revealed 🔊 → Melody plays 🎵 → Record your real pet 🎙️ → Remix → Save 💾
+Draw 🎨 → Melody generates 🎵 → Remix with genre 🎸 → Add your voice 🎤 → Save to Gallery 💾
 ```
 
 ---
@@ -87,33 +74,45 @@ Draw 🎨 → Sound Profile revealed 🔊 → Melody plays 🎵 → Record your 
 | React + TypeScript | UI and logic |
 | Vite | Bundler and dev server |
 | Web Audio API | Melody synthesis + live audio recording + remixing |
-| MediaRecorder API | Recording the real pet's voice |
+| MediaRecorder API | Voice recording |
 | Supabase Auth | User login / registration |
-| Supabase Database | Pet data storage |
+| Supabase Database | Doodle data storage |
 | Supabase Storage | Drawing uploads |
+| Figma Make | UI prototyping |
+| Figma MCP + GitHub | Design-to-code sync |
+| Vercel | Deployment |
 | CSS-in-JS inline | Tomodachi Life–inspired visual style |
 
 ---
 
-## 📁 Relevant structure
+## 📁 Project structure
 
 ```
 src/
 ├── app/
-│   ├── App.tsx                  # Main navigation + auth guard
+│   ├── App.tsx                   # Main navigation + auth guard
 │   └── components/
-│       ├── DrawMode.tsx          # Drawing canvas
-│       ├── SoundProfile.tsx      # Sound profile reveal + mood
-│       ├── PlayMode.tsx          # Melody player
-│       ├── VoiceMode.tsx         # Record real pet + remix
-│       ├── PetProfile.tsx        # Saved pet view
-│       ├── SavePetModal.tsx      # Save modal
-│       └── LoginScreen.tsx       # Login / register screen
+│       ├── DrawMode.tsx           # Drawing canvas
+│       ├── PlayMode.tsx           # Melody player + genre remix
+│       ├── VoiceMode.tsx          # Voice recording + layering
+│       ├── ExperimentMode.tsx     # Experiment tab
+│       ├── PetProfile.tsx         # Saved doodle view
+│       ├── SavePetModal.tsx       # Save modal
+│       ├── LoginScreen.tsx        # Login / register screen
+│       └── TomodachiLogin.tsx     # Animated login screen
 ├── hooks/
-│   ├── useDrawSound.ts           # Drawing analysis → Sound Profile
-│   ├── usePetRecorder.ts         # MediaRecorder → real pet voice
-│   └── useRemix.ts               # Layering voice + melody
+│   ├── useDrawSound.ts            # Drawing analysis → Sound Profile
+│   ├── usePetRecorder.ts          # MediaRecorder → voice
+│   └── useRemix.ts                # Layering voice + melody
 └── lib/
-    ├── supabase.ts               # Auth + DB + Storage
-    └── moodDetect.ts             # Mood detection from Sound Profile
+    ├── supabase.ts                # Auth + DB + Storage
+    └── moodDetect.ts              # Mood detection from Sound Profile
 ```
+
+---
+
+## 💛 Made with
+
+This project was built with love, a lot of bad drawings, and the belief that imperfection is where creativity actually lives.
+
+> *"Come as you are. Your imperfection is the art."*
