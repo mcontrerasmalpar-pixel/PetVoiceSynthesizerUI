@@ -5,15 +5,16 @@ import { ExperimentMode } from "./components/ExperimentMode";
 import { PetProfile }     from "./components/PetProfile";
 import { SavePetModal }   from "./components/SavePetModal";
 import { LoginScreen }    from "./components/LoginScreen";
+import { DailyMode }      from "./components/DailyMode";
 import { uploadDrawing, savePet, type AnimalType, type Pet } from "../lib/supabase";
 import type { MelodyNote } from "./components/PlayMode";
 
-type Screen = "draw" | "play" | "experiment" | "profile";
+type Screen = "daily" | "draw" | "play" | "experiment" | "profile";
 
 export default function App() {
   const [loggedIn,       setLoggedIn]       = useState(false);
   const [ownerName,      setOwnerName]      = useState("Tú");
-  const [screen,         setScreen]         = useState<Screen>("draw");
+  const [screen,         setScreen]         = useState<Screen>("daily");
   const [drawingDataUrl, setDrawingDataUrl] = useState<string | null>(null);
   const [showSaveModal,  setShowSaveModal]  = useState(false);
   const [saving,         setSaving]         = useState(false);
@@ -53,6 +54,7 @@ export default function App() {
   if (!loggedIn) return <LoginScreen onLogin={handleLogin} />;
 
   const TABS: { id: Screen; label: string; locked?: boolean }[] = [
+    { id: "daily",      label: "🎯 Daily" },
     { id: "draw",       label: "🎨 Draw" },
     { id: "play",       label: "🎵 Listen" },
     { id: "experiment", label: "🎛️ Remix" },
@@ -99,14 +101,19 @@ export default function App() {
           {TABS.map(t => (
             <button key={t.id} onClick={() => !t.locked && goTo(t.id)} style={{
               padding:"5px 10px", borderRadius:"50px",
-              background: screen===t.id ? "#FF8C42" : t.locked ? "#E8E0C8" : "#FFFBF2",
-              border: screen===t.id ? "3px solid #1A1A1A" : "2px solid #1A1A1A",
+              background: screen===t.id
+                ? (t.id==="daily" ? "#FF8C42" : "#FF8C42")
+                : t.locked ? "#E8E0C8" : "#FFFBF2",
+              border: screen===t.id
+                ? (t.id==="daily" ? "3px solid #1A1A1A" : "3px solid #1A1A1A")
+                : "2px solid #1A1A1A",
               color: t.locked ? "#AAA" : "#1A1A1A",
               cursor: t.locked ? "not-allowed" : "pointer",
               fontFamily:"'Chewy'", fontSize:"0.78rem",
-              boxShadow: "2px 2px 0 #1A1A1A",
+              boxShadow: screen===t.id ? "2px 2px 0 #1A1A1A" : "2px 2px 0 #1A1A1A",
               transform: screen===t.id ? "translate(1px,1px)" : "none",
               whiteSpace: "nowrap",
+              touchAction: "manipulation",
             }}>{t.label}{t.locked ? " 🔒" : ""}</button>
           ))}
         </div>
@@ -119,6 +126,7 @@ export default function App() {
           padding:"4px 12px", boxShadow:"3px 3px 0 #1A1A1A",
           cursor: drawingDataUrl ? "pointer" : "default",
           fontFamily:"'Chewy'", flexShrink:0,
+          touchAction: "manipulation",
         }}>
           {drawingDataUrl
             ? <img src={drawingDataUrl} style={{ width:"22px",height:"22px",borderRadius:"4px",border:"2px solid #1A1A1A",objectFit:"cover" }} />
@@ -130,6 +138,9 @@ export default function App() {
       </header>
 
       <div style={{ flex:1, overflow:"hidden", display:"flex", flexDirection:"column" }}>
+        {screen === "daily" && (
+          <DailyMode onMelodyReady={setMelody} />
+        )}
         {screen === "draw" && (
           <DrawMode
             onSaveDrawing={handleSaveDrawing}
@@ -166,7 +177,7 @@ export default function App() {
         background:"#B8E04A", borderTop:"3px solid #1A1A1A",
         display:"flex", alignItems:"center", justifyContent:"center", gap:"10px",
       }}>
-        {["1 · Draw 🎨","→","2 · Listen 🎵","→","3 · Remix 🎛️","→","4 · Save 💾"].map((t,i) => (
+        {["1 · Daily 🎯","→","2 · Draw 🎨","→","3 · Listen 🎵","→","4 · Remix 🎛️"].map((t,i) => (
           <span key={i} style={{ fontSize:"0.72rem",color:"#1A1A1A",fontFamily:"'Chewy'",opacity:i%2===1?0.4:1 }}>{t}</span>
         ))}
       </div>
