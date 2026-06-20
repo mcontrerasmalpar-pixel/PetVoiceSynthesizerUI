@@ -110,73 +110,151 @@ function getOutputNode(): AudioNode {
 
 type InstrumentId = "piano"|"guitar"|"marimba"|"flute"|"bells"|"synthpad";
 
-function playNote(freq: number, vol: number, dur: number, inst: InstrumentId, startTime: number) {
+// --- Genre remix types & data ---
+interface GenreDef {
+  id: string; label: string; emoji: string;
+  color: string; textColor: string;
+  oscType: OscillatorType;
+  filterHz: number; reverbMix: number;
+  durMult: number; gapMult: number; volMult: number;
+  distortion: boolean; distAmount: number; pitchShift: number;
+}
+
+const GENRES: GenreDef[] = [
+  { id:"none",   label:"Original", emoji:"🎨", color:"#FFFBF2", textColor:"#1A1A1A",
+    oscType:"sine",     filterHz:4000, reverbMix:0.20,
+    durMult:1.0,  gapMult:1.0,  volMult:1.0,  distortion:false, distAmount:0,   pitchShift:0 },
+  { id:"jazz",   label:"Jazz",    emoji:"🎷", color:"#FF8C42", textColor:"#FFF",
+    oscType:"sine",     filterHz:2200, reverbMix:0.40,
+    durMult:1.2,  gapMult:1.3,  volMult:0.8,  distortion:false, distAmount:0,   pitchShift:-5 },
+  { id:"rock",   label:"Rock",    emoji:"🎸", color:"#FF4444", textColor:"#FFF",
+    oscType:"sawtooth", filterHz:3500, reverbMix:0.15,
+    durMult:0.8,  gapMult:0.6,  volMult:1.1,  distortion:true,  distAmount:150, pitchShift:0 },
+  { id:"ballad", label:"Ballad",  emoji:"🎻", color:"#5BC8F5", textColor:"#1A1A1A",
+    oscType:"sine",     filterHz:1400, reverbMix:0.60,
+    durMult:1.8,  gapMult:1.5,  volMult:0.75, distortion:false, distAmount:0,   pitchShift:5 },
+  { id:"pop",    label:"Pop",     emoji:"🎤", color:"#FF6BE8", textColor:"#FFF",
+    oscType:"triangle", filterHz:4000, reverbMix:0.28,
+    durMult:1.0,  gapMult:0.9,  volMult:0.9,  distortion:false, distAmount:0,   pitchShift:0 },
+  { id:"funk",   label:"Funk",    emoji:"🎺", color:"#1A1A2E", textColor:"#FFE033",
+    oscType:"square",   filterHz:1800, reverbMix:0.22,
+    durMult:0.6,  gapMult:0.8,  volMult:1.0,  distortion:false, distAmount:0,   pitchShift:7 },
+  { id:"metal",  label:"Metal",   emoji:"🤘", color:"#777",   textColor:"#FFF",
+    oscType:"sawtooth", filterHz:5000, reverbMix:0.08,
+    durMult:0.5,  gapMult:0.3,  volMult:1.2,  distortion:true,  distAmount:400, pitchShift:-12 },
+];
+
+function semShift(freq: number, semitones: number) {
+  return freq * Math.pow(2, semitones / 12);
+}
+
+function playNote(freq: number, vol: number, dur: number, inst: InstrumentId, startTime: number, genre?: GenreDef) {
   const ctx = getCtx();
   const out = getOutputNode();
+
+  // Apply genre pitch shift
+  const finalFreq = genre && genre.id !== "none" ? semShift(freq, genre.pitchShift) : freq;
+  const finalDur  = genre && genre.id !== "none" ? dur * genre.durMult : dur;
+  const finalVol  = genre && genre.id !== "none" ? Math.min(vol * genre.volMult, 1.0) : vol;
+  const oscType: OscillatorType = genre && genre.id !== "none" ? genre.oscType : "sine";
+
+  // Reverb setup
+  const revMix = genre ? genre.reverbMix : 0.2;
+  const revLen = Math.ceil(ctx.sampleRate * 1.2);
+  const revBuf = ctx.createBuffer(1, revLen, ctx.sampleRate);
+  const rd = revBuf.getChannelData(0);
+  for (let i = 0; i < revLen; i++) rd[i] = (Math.random()*2-1)*Math.pow(1-i/revLen,2.5);
+  const conv = ctx.createConvolver(); conv.buffer = revBuf;
+  const revWet = ctx.createGain(); revWet.gain.value = revMix;
+  const revDry = ctx.createGain(); revDry.gain.value = 1 - revMix;
+  conv.connect(revWet); revWet.connect(out);
+  revDry.connect(out);
+
   const gain = ctx.createGain();
-  gain.connect(out);
   gain.gain.setValueAtTime(0.001, startTime);
+
+  // Distortion for rock/metal
+  if (genre?.distortion && genre.distAmount > 0) {
+    const dist = ctx.createWaveShaper();
+    const curve = new Float32Array(256);
+    const k = genre.distAmount;
+    for (let i = 0; i < 256; i++) {
+      const x = (i * 2) / 256 - 1;
+      curve[i] = ((Math.PI + k) * x) / (Math.PI + k * Math.abs(x));
+    }
+    dist.curve = curve;
+    const filt = ctx.createBiquadFilter(); filt.type = "lowpass"; filt.frequency.value = genre.filterHz;
+    const osc = ctx.createOscillator(); osc.type = oscType; osc.frequency.value = finalFreq;
+    osc.connect(filt); filt.connect(dist); dist.connect(gain);
+    gain.gain.linearRampToValueAtTime(finalVol, startTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + finalDur);
+    gain.connect(revDry); gain.connect(conv);
+    osc.start(startTime); osc.stop(startTime + finalDur + 0.05);
+    return;
+  }
+
   switch (inst) {
     case "piano": {
-      const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = freq; o.connect(gain);
-      gain.gain.linearRampToValueAtTime(vol, startTime+0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime+dur);
-      o.start(startTime); o.stop(startTime+dur);
-      const o2 = ctx.createOscillator(); o2.type = "triangle"; o2.frequency.value = freq*2;
+      const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = finalFreq; o.connect(gain);
+      gain.gain.linearRampToValueAtTime(finalVol, startTime+0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime+finalDur);
+      o.start(startTime); o.stop(startTime+finalDur);
+      const o2 = ctx.createOscillator(); o2.type = "triangle"; o2.frequency.value = finalFreq*2;
       const g2 = ctx.createGain(); g2.gain.value = 0.1; o2.connect(g2); g2.connect(gain);
-      o2.start(startTime); o2.stop(startTime+dur);
+      o2.start(startTime); o2.stop(startTime+finalDur);
       break;
     }
     case "guitar": {
-      const o = ctx.createOscillator(); o.type = "sawtooth"; o.frequency.value = freq;
-      const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 1800;
+      const o = ctx.createOscillator(); o.type = oscType !== "sine" ? oscType : "sawtooth"; o.frequency.value = finalFreq;
+      const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = genre?.filterHz ?? 1800;
       o.connect(f); f.connect(gain);
-      gain.gain.linearRampToValueAtTime(vol*0.9, startTime+0.005);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime+dur*0.8);
-      o.start(startTime); o.stop(startTime+dur);
+      gain.gain.linearRampToValueAtTime(finalVol*0.9, startTime+0.005);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime+finalDur*0.8);
+      o.start(startTime); o.stop(startTime+finalDur);
       break;
     }
     case "marimba": {
-      const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = freq; o.connect(gain);
-      gain.gain.linearRampToValueAtTime(vol, startTime+0.003);
+      const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = finalFreq; o.connect(gain);
+      gain.gain.linearRampToValueAtTime(finalVol, startTime+0.003);
       gain.gain.exponentialRampToValueAtTime(0.001, startTime+0.55);
       o.start(startTime); o.stop(startTime+0.6);
       break;
     }
     case "flute": {
-      const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = freq;
+      const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = finalFreq;
       const vib = ctx.createOscillator(); vib.frequency.value = 5.5;
-      const vg = ctx.createGain(); vg.gain.value = freq*0.012;
+      const vg = ctx.createGain(); vg.gain.value = finalFreq*0.012;
       vib.connect(vg); vg.connect(o.frequency); o.connect(gain);
-      gain.gain.linearRampToValueAtTime(vol*0.7, startTime+0.06);
-      gain.gain.setValueAtTime(vol*0.7, startTime+dur-0.1);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime+dur);
-      vib.start(startTime); vib.stop(startTime+dur);
-      o.start(startTime); o.stop(startTime+dur);
+      gain.gain.linearRampToValueAtTime(finalVol*0.7, startTime+0.06);
+      gain.gain.setValueAtTime(finalVol*0.7, startTime+finalDur-0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime+finalDur);
+      vib.start(startTime); vib.stop(startTime+finalDur);
+      o.start(startTime); o.stop(startTime+finalDur);
       break;
     }
     case "bells": {
       [1,2.756,5.404].forEach((ratio,i) => {
-        const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = freq*ratio;
-        const g = ctx.createGain(); g.gain.value = i===0 ? vol : vol*0.14;
-        o.connect(g); g.connect(gain); o.start(startTime); o.stop(startTime+dur*1.5);
+        const o = ctx.createOscillator(); o.type = "sine"; o.frequency.value = finalFreq*ratio;
+        const g = ctx.createGain(); g.gain.value = i===0 ? finalVol : finalVol*0.14;
+        o.connect(g); g.connect(gain); o.start(startTime); o.stop(startTime+finalDur*1.5);
       });
       gain.gain.linearRampToValueAtTime(1, startTime+0.002);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime+dur*1.5);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime+finalDur*1.5);
       break;
     }
     case "synthpad": {
       [1,1.005,0.5].forEach(ratio => {
-        const o = ctx.createOscillator(); o.type = "sawtooth"; o.frequency.value = freq*ratio;
-        const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900;
-        o.connect(f); f.connect(gain); o.start(startTime); o.stop(startTime+dur+0.3);
+        const o = ctx.createOscillator(); o.type = oscType !== "sine" ? oscType : "sawtooth"; o.frequency.value = finalFreq*ratio;
+        const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = genre?.filterHz ?? 900;
+        o.connect(f); f.connect(gain); o.start(startTime); o.stop(startTime+finalDur+0.3);
       });
-      gain.gain.linearRampToValueAtTime(vol*0.5, startTime+0.12);
-      gain.gain.setValueAtTime(vol*0.5, startTime+dur-0.1);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime+dur+0.3);
+      gain.gain.linearRampToValueAtTime(finalVol*0.5, startTime+0.12);
+      gain.gain.setValueAtTime(finalVol*0.5, startTime+finalDur-0.1);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime+finalDur+0.3);
       break;
     }
   }
+  gain.connect(revDry); gain.connect(conv);
 }
 
 const INSTRUMENTS: {id:InstrumentId;label:string;emoji:string;bg:string}[] = [
@@ -209,10 +287,11 @@ function MelodyGrid({notes,activeStep}:{notes:MelodyNote[];activeStep:number}) {
 }
 
 // Doodle Recorder
-function DoodleRecorder({ melody, instId, tempo }: {
+function DoodleRecorder({ melody, instId, tempo, activeGenre }: {
   melody: MelodyNote[];
   instId: InstrumentId;
   tempo: number;
+  activeGenre: GenreDef;
 }) {
   const [recording, setRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
@@ -223,10 +302,8 @@ function DoodleRecorder({ melody, instId, tempo }: {
 
   const startRecording = async () => {
     try {
-      // Resume or create AudioContext inside user gesture to unblock autoplay
       const ctx = getCtx();
       if (ctx.state === "suspended") await ctx.resume();
-
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mr = new MediaRecorder(stream);
       chunksRef.current = [];
@@ -262,20 +339,20 @@ function DoodleRecorder({ melody, instId, tempo }: {
       let t = ctx.currentTime + 0.05;
       const loopNotes = [...melody, ...melody, ...melody];
       for (const note of loopNotes) {
-        if (!note.rest) playNote(note.freq, note.volume, note.duration*(120/tempo), instId, t);
+        if (!note.rest) playNote(note.freq, note.volume, note.duration*(120/tempo), instId, t, activeGenre);
         t += (beatMs/1000) * (note.rest ? 0.5 : note.duration*(120/tempo)*1.05);
       }
       const melodyDuration = (t - ctx.currentTime) * 1000 + 300;
       const arrayBuf = await audioBlob.arrayBuffer();
       const decoded  = await ctx.decodeAudioData(arrayBuf);
-      const petSrc   = ctx.createBufferSource();
-      petSrc.buffer = decoded; petSrc.loop = true;
-      const petGain  = ctx.createGain(); petGain.gain.value = 0.75;
-      petSrc.connect(petGain); petGain.connect(masterBus);
-      petSrc.start();
+      const voiceSrc = ctx.createBufferSource();
+      voiceSrc.buffer = decoded; voiceSrc.loop = true;
+      const voiceGain = ctx.createGain(); voiceGain.gain.value = 0.75;
+      voiceSrc.connect(voiceGain); voiceGain.connect(masterBus);
+      voiceSrc.start();
       mr.start();
       setTimeout(() => {
-        mr.stop(); petSrc.stop();
+        mr.stop(); voiceSrc.stop();
         _masterBus = null; masterBus.disconnect();
         mr.onstop = () => {
           setRemixURL(URL.createObjectURL(new Blob(chunks, { type: "audio/webm" })));
@@ -288,7 +365,6 @@ function DoodleRecorder({ melody, instId, tempo }: {
   return (
     <div style={{ padding:"0 14px 10px", display:"flex", flexDirection:"column", gap:"6px" }}>
       <div style={{ height:"2px", background:"rgba(0,0,0,0.12)", borderRadius:"2px", marginBottom:"2px" }} />
-
       <div style={{ display:"flex", gap:"8px" }}>
         <button
           onClick={recording ? stopRecording : startRecording}
@@ -296,7 +372,6 @@ function DoodleRecorder({ melody, instId, tempo }: {
           <span style={{ fontSize:"0.75rem" }}>{recording ? "⏹" : "🔴"}</span>
           <span>{recording ? "Stop" : "Record your voice"}</span>
         </button>
-
         {audioBlob && !recording && (
           <button
             onClick={remixWithMelody}
@@ -307,7 +382,6 @@ function DoodleRecorder({ melody, instId, tempo }: {
           </button>
         )}
       </div>
-
       {remixURL && (
         <div style={{ background:"#B8E04A", border:"2px solid #1A1A1A", borderRadius:"12px", padding:"8px 12px", boxShadow:"3px 3px 0 #1A1A1A", display:"flex", alignItems:"center", gap:"8px" }}>
           <audio controls src={remixURL} style={{ flex:1, height:"28px" }} />
@@ -339,6 +413,7 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
   const [activeInst,  setActiveInst]  = useState(0);
   const [tempo,       setTempo]       = useState(120);
   const [loop,        setLoop]        = useState(true);
+  const [activeGenre, setActiveGenre] = useState<GenreDef>(GENRES[0]);
 
   const stopRef    = useRef(false);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -346,11 +421,13 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
   const tempoRef   = useRef(120);
   const loopRef    = useRef(true);
   const melodyRef  = useRef<MelodyNote[]>([]);
+  const genreRef   = useRef<GenreDef>(GENRES[0]);
 
   useEffect(() => { instIdRef.current = INSTRUMENTS[activeInst].id; }, [activeInst]);
   useEffect(() => { tempoRef.current = tempo; }, [tempo]);
   useEffect(() => { loopRef.current = loop; }, [loop]);
   useEffect(() => { melodyRef.current = melody; }, [melody]);
+  useEffect(() => { genreRef.current = activeGenre; }, [activeGenre]);
 
   useEffect(() => {
     if (!drawingDataUrl) return;
@@ -386,7 +463,7 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
       const note = notes[step];
       const beatMs = (60 / tempoRef.current) * 1000;
       setActiveStep(step);
-      if (!note.rest) playNote(note.freq, note.volume, note.duration*(120/tempoRef.current), instIdRef.current, ctx.currentTime);
+      if (!note.rest) playNote(note.freq, note.volume, note.duration*(120/tempoRef.current), instIdRef.current, ctx.currentTime, genreRef.current);
       step++;
       if (step >= notes.length) {
         if (loopRef.current) { step=0; timeoutRef.current=setTimeout(tick, beatMs*0.4); }
@@ -416,8 +493,13 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
     if (wasPlaying) setTimeout(()=>play(), 80);
   };
 
+  const handleGenreChange = (g: GenreDef) => {
+    const wasPlaying = !stopRef.current && isPlaying;
+    stop(); setActiveGenre(g); genreRef.current = g;
+    if (wasPlaying) setTimeout(()=>play(), 80);
+  };
+
   const handlePlayClick = () => {
-    // must be inside user gesture so AudioContext resumes
     const ctx = getCtx();
     if (ctx.state === "suspended") ctx.resume().then(() => isPlaying ? stop() : play());
     else isPlaying ? stop() : play();
@@ -425,7 +507,7 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" style={{fontFamily:"'Chewy',cursive", background:"#5BC8F5"}}>
-      {/* Top bar */}
+      {/* Top bar — instruments */}
       <div style={{background:"#5BC8F5", borderBottom:"3px solid #1A1A1A", padding:"10px 16px", display:"flex", alignItems:"center", gap:"12px", flexShrink:0, flexWrap:"wrap"}}>
         <div style={{width:"60px", height:"60px", background:"#FFFBF2", border:"3px solid #1A1A1A", borderRadius:"14px", overflow:"hidden", flexShrink:0, boxShadow:"3px 3px 0 #1A1A1A", display:"flex", alignItems:"center", justifyContent:"center"}}>
           {drawingDataUrl ? <img src={drawingDataUrl} style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <span style={{fontSize:"1.6rem"}}>🎨</span>}
@@ -434,7 +516,7 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
           <span style={{fontSize:"0.85rem", color:"#1A1A1A"}}>🎵 Generated melody</span>
           {isAnalyzing
             ? <span style={{fontSize:"0.7rem", color:"#555"}}>⏳ Analyzing drawing...</span>
-            : <span style={{fontSize:"0.7rem", color:"#555"}}>{melody.filter(n=>!n.rest).length} notes · scale detected</span>}
+            : <span style={{fontSize:"0.7rem", color:"#555"}}>{melody.filter(n=>!n.rest).length} notes · {activeGenre.id !== "none" ? activeGenre.label + " style" : "original scale"}</span>}
         </div>
         <div style={{display:"flex", gap:"6px", flexWrap:"wrap", flex:1, justifyContent:"center"}}>
           {INSTRUMENTS.map((ins,i) => {
@@ -442,6 +524,34 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
             return (
               <button key={ins.id} onClick={()=>handleInstChange(i)} style={{padding:"6px 14px", borderRadius:"50px", background: active ? ins.bg : "#FFFBF2", border: active ? "4px solid #1A1A1A" : "3px solid #1A1A1A", cursor:"pointer", fontFamily:"'Chewy',cursive", fontSize:"0.85rem", color:"#1A1A1A", boxShadow: active ? "2px 2px 0 #1A1A1A" : "3px 3px 0 #1A1A1A", transform: active ? "translate(1px,1px)" : "none", transition:"all 0.1s", display:"flex", alignItems:"center", gap:"4px"}}>
                 <span>{ins.emoji}</span><span>{ins.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Genre remix pills */}
+      <div style={{background:"#4AB8E8", borderBottom:"3px solid #1A1A1A", padding:"8px 14px", flexShrink:0}}>
+        <div style={{fontSize:"0.72rem", color:"#1A1A1A", marginBottom:5, textAlign:"center", opacity:0.8}}>🎶 Remix your drawing in a genre</div>
+        <div style={{display:"flex", gap:"6px", flexWrap:"wrap", justifyContent:"center"}}>
+          {GENRES.map(g => {
+            const active = activeGenre.id === g.id;
+            return (
+              <button key={g.id}
+                onClick={() => handleGenreChange(g)}
+                style={{
+                  padding:"5px 12px", borderRadius:"50px",
+                  background: active ? g.color : "#FFFBF2",
+                  border: active ? "3px solid #1A1A1A" : "2px solid #1A1A1A",
+                  color: active ? g.textColor : "#1A1A1A",
+                  fontFamily:"'Chewy',cursive", fontSize:"0.82rem",
+                  boxShadow: active ? "2px 2px 0 #1A1A1A" : "2px 2px 0 rgba(0,0,0,0.2)",
+                  transform: active ? "translate(1px,1px)" : "none",
+                  cursor:"pointer", transition:"all 0.1s",
+                  display:"flex", alignItems:"center", gap:4,
+                  WebkitTapHighlightColor:"transparent",
+                }}>
+                <span>{g.emoji}</span><span>{g.label}</span>
               </button>
             );
           })}
@@ -467,7 +577,7 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
       </div>
 
       {/* Doodle recorder */}
-      <DoodleRecorder melody={melody} instId={INSTRUMENTS[activeInst].id} tempo={tempo} />
+      <DoodleRecorder melody={melody} instId={INSTRUMENTS[activeInst].id} tempo={tempo} activeGenre={activeGenre} />
 
       {/* Footer */}
       <div style={{background:"#FFFBF2", borderTop:"3px solid #1A1A1A", padding:"10px 20px", display:"flex", alignItems:"center", gap:"14px", flexShrink:0, flexWrap:"wrap", boxShadow:"0 -2px 0 #1A1A1A"}}>
@@ -483,10 +593,10 @@ export function PlayMode({drawingDataUrl,onMelodyReady,onPlayingChange,externalP
           <span style={{fontSize:"0.9rem", color:"#1A1A1A", flexShrink:0}}>Tempo</span>
           <input type="range" min={60} max={200} step={5} value={tempo}
             onChange={e => { stop(); setTempo(Number(e.target.value)); }}
-            style={{flex:1, accentColor:inst.bg, cursor:"pointer"}}/>
-          <span style={{background:inst.bg, border:"2px solid #1A1A1A", borderRadius:"50px", padding:"2px 12px", fontSize:"0.9rem", color:"#1A1A1A", minWidth:"50px", textAlign:"center", flexShrink:0}}>{tempo}</span>
+            style={{flex:1, accentColor:activeGenre.id !== "none" ? activeGenre.color : inst.bg, cursor:"pointer"}}/>
+          <span style={{background: activeGenre.id !== "none" ? activeGenre.color : inst.bg, border:"2px solid #1A1A1A", borderRadius:"50px", padding:"2px 12px", fontSize:"0.9rem", color: activeGenre.id !== "none" ? activeGenre.textColor : "#1A1A1A", minWidth:"50px", textAlign:"center", flexShrink:0}}>{tempo}</span>
         </div>
-        <button onClick={()=>setLoop(l=>!l)} style={{padding:"8px 14px", borderRadius:"50px", background: loop ? inst.bg : "#FFFBF2", border: loop ? "4px solid #1A1A1A" : "3px solid #1A1A1A", cursor:"pointer", fontFamily:"'Chewy',cursive", fontSize:"0.85rem", color:"#1A1A1A", boxShadow: loop ? "2px 2px 0 #1A1A1A" : "3px 3px 0 #1A1A1A", transform: loop ? "translate(1px,1px)" : "none", display:"flex", alignItems:"center", gap:"5px"}}>
+        <button onClick={()=>setLoop(l=>!l)} style={{padding:"8px 14px", borderRadius:"50px", background: loop ? (activeGenre.id !== "none" ? activeGenre.color : inst.bg) : "#FFFBF2", border: loop ? "4px solid #1A1A1A" : "3px solid #1A1A1A", cursor:"pointer", fontFamily:"'Chewy',cursive", fontSize:"0.85rem", color: loop && activeGenre.id !== "none" ? activeGenre.textColor : "#1A1A1A", boxShadow: loop ? "2px 2px 0 #1A1A1A" : "3px 3px 0 #1A1A1A", transform: loop ? "translate(1px,1px)" : "none", display:"flex", alignItems:"center", gap:"5px"}}>
           <span>🔁</span><span>Loop {loop ? "ON" : "OFF"}</span>
         </button>
         {onSavePet && !savedPet && melody.length>0 && (
