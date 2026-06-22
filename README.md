@@ -2,7 +2,7 @@
 
 > Draw anything. Hear it as music. No skills required.
 
-Live app: ((https://doodio-alpha.vercel.app/))
+Live app: ([https://doodio-alpha.vercel.app/])
 
 Built for the **Figma Make Challenge** — prototyped with Figma Make, connected to GitHub via Figma MCP.
 
